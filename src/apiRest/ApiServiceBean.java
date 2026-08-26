@@ -2,7 +2,6 @@ package apiRest;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import java.security.MessageDigest;
 import java.util.Map;
 
 import javax.faces.context.FacesContext;
@@ -44,8 +43,7 @@ public class ApiServiceBean {
                 return;
             }
 
-            String cacheKey = DataService.getCacheKey(config, params);
-            String etag = generateETag(cacheKey);
+            String etag = DataService.getCacheETag(config, params);
 
             if(etag != null) {
                 response.setHeader("ETag", etag);
@@ -88,27 +86,6 @@ public class ApiServiceBean {
     }
 
     // -------- ETAG HANDLING --------
-
-    /**
-     * Berechnet einen starken ETag als MD5-Hash des JSON-Inhalts.
-     * Aendert sich der Inhalt nicht, bleibt der ETag identisch.
-     */
-    private String generateETag(String content) {
-        try {
-            MessageDigest md = MessageDigest.getInstance("MD5");
-            byte[] hash = md.digest(content.getBytes("UTF-8"));
-
-            StringBuilder hex = new StringBuilder(hash.length * 2 + 2);
-            for(byte b : hash) {
-                hex.append(String.format("%02x", b));
-            }
-
-            return "\"" + hex.toString() + "\"";
-
-        } catch (Exception e) {
-            return null;
-        }
-    }
 
     /**
      * Prueft den If-None-Match Header gegen den aktuellen ETag.
