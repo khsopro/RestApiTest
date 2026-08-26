@@ -1,8 +1,6 @@
 package apiRest;
 
-import java.security.MessageDigest;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.text.ParseException;
 import java.time.Instant;
 import lotus.domino.*;
@@ -15,23 +13,14 @@ import org.json.JSONObject;
 
 public class DataService {
 
-    private static final Object ETAG_CACHE_LOCK = new Object();
-    private static final String ETAG_CACHE_SCOPE_KEY = "apiRestEtagCache";
-
     /**
-     * Ermittelt den ETag fuer view+start+limit. Schneller Vorab-Check ueber
-     * view.getEntryCount() (O(1)) gegen den zuletzt in applicationScope
-     * gemerkten Wert: stimmt er ueberein, wird der gecachte ETag direkt
-     * zurueckgegeben, ohne die View erneut zu durchlaufen. Nur bei Verdacht
-     * auf Aenderung (Anzahl weicht ab oder erster Aufruf) liest der zweite,
-     * genauere Durchlauf je Eintrag getLastModified() (kein Feld-Mapping,
-     * kein JSON-Aufbau) und bildet daraus den neuen ETag.
-     *
-     * Achtung: reine inhaltliche Aenderungen an bestehenden Dokumenten, ohne
-     * dass sich die Anzahl der View-Eintraege aendert, werden vom Fast-Path
-     * NICHT erkannt.
+     * Fingerabdruck des Ergebnisses fuer den ETag: durchlaeuft dieselbe Seite
+     * (start/limit) wie getData(), liest je Eintrag aber nur getLastModified()
+     * statt die Felder zu konvertieren und JSON aufzubauen. Erkennt damit auch
+     * replizierte Aenderungen (anders als Database.getLastModified()) und ist
+     * trotz zweitem View-Durchlauf deutlich guenstiger als der volle JSON-Aufbau.
      */
-    public static String getCacheETag(
+    public static String getCacheKey(
         Map<String, Object> config,
         Map<String, String> params
     ) throws Exception {
@@ -47,33 +36,13 @@ public class DataService {
         int limit = getLimit(config, params);
         int start = parseInt(params.get("start"), 0);
 
-        String pageKey = viewName + "|" + start + "|" + limit;
-        int currentCount = view.getEntryCount();
-
-        Map<String, String> etagCache = getEtagCache();
-        String cached = etagCache.get(pageKey);
-
-        if(cached != null) {
-            int sep = cached.indexOf(':');
-            if(sep > -1) {
-                try {
-                    int cachedCount = Integer.parseInt(cached.substring(0, sep));
-                    if(cachedCount == currentCount) {
-                        view.recycle();
-                        db.recycle();
-                        return cached.substring(sep + 1);
-                    }
-                } catch(NumberFormatException ignore) {}
-            }
-        }
-
         ViewNavigator nav = view.createViewNav();
         ViewEntry entry = nav.getNth(start + 1);
 
         long latest = 0;
-        int scanned = 0;
+        int count = 0;
 
-        while(entry != null && scanned < limit) {
+        while(entry != null && count < limit) {
 
             if(entry.isCategory()) {
                 entry = nav.getNext(entry);
@@ -92,52 +61,13 @@ public class DataService {
             entry.recycle();
             entry = tmp;
 
-            scanned++;
+            count++;
         }
 
         view.recycle();
         db.recycle();
 
-        String etag = hashETag(pageKey + "|" + scanned + "|" + latest);
-
-        if(etag != null) {
-            etagCache.put(pageKey, currentCount + ":" + etag);
-        }
-
-        return etag;
-    }
-
-    private static String hashETag(String content) {
-        try {
-            MessageDigest md = MessageDigest.getInstance("MD5");
-            byte[] hash = md.digest(content.getBytes("UTF-8"));
-
-            StringBuilder hex = new StringBuilder(hash.length * 2 + 2);
-            for(byte b : hash) {
-                hex.append(String.format("%02x", b));
-            }
-
-            return "\"" + hex.toString() + "\"";
-
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, String> getEtagCache() {
-
-        Map<String, Object> appScope =
-            (Map<String, Object>) ExtLibUtil.resolveVariable("applicationScope");
-
-        synchronized(ETAG_CACHE_LOCK) {
-            Map<String, String> cache = (Map<String, String>) appScope.get(ETAG_CACHE_SCOPE_KEY);
-            if(cache == null) {
-                cache = new ConcurrentHashMap<String, String>();
-                appScope.put(ETAG_CACHE_SCOPE_KEY, cache);
-            }
-            return cache;
-        }
+        return viewName + "|" + start + "|" + limit + "|" + count + "|" + latest;
     }
 
     public static Object getData(
