@@ -44,22 +44,23 @@ public class ApiServiceBean {
                 return;
             }
 
-            Object data = DataService.getData(config, params);
-            String json = data.toString();
-
-            String etag = generateETag(json);
-            String ifNoneMatch = req.getHeader("If-None-Match");
+            String cacheKey = DataService.getCacheKey(config, params);
+            String etag = generateETag(cacheKey);
 
             if(etag != null) {
                 response.setHeader("ETag", etag);
             }
+
+            String ifNoneMatch = req.getHeader("If-None-Match");
 
             if(etag != null && matchesETag(ifNoneMatch, etag)) {
                 response.setStatus(HttpServletResponse.SC_NOT_MODIFIED);
                 return;
             }
 
-            writer.write(json);
+            // Erst ab hier wird tatsaechlich der teure JSON-Aufbau angestossen
+            Object data = DataService.getData(config, params);
+            writer.write(data.toString());
 
         } catch (Exception e) {
            StringWriter sw = new StringWriter();

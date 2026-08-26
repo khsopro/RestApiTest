@@ -13,6 +13,40 @@ import org.json.JSONObject;
 
 public class DataService {
 
+    /**
+     * Billiger Fingerabdruck des Ergebnisses (DB-LastModified + View-EntryCount
+     * + Paginierungsparameter), ohne die View zu durchlaufen. Dient als Basis
+     * fuer den ETag, damit der teure JSON-Aufbau nur bei tatsaechlicher
+     * Aenderung angestossen wird.
+     */
+    public static String getCacheKey(
+        Map<String, Object> config,
+        Map<String, String> params
+    ) throws Exception {
+
+        Session session = (Session) ExtLibUtil.resolveVariable("session");
+        Database db = session.getCurrentDatabase();
+
+        String viewName = (String) config.get("view");
+
+        View view = db.getView(viewName);
+        view.setAutoUpdate(false);
+
+        DateTime modified = db.getLastModified();
+        long dbModified = modified.toJavaDate().getTime();
+        modified.recycle();
+
+        int entryCount = view.getEntryCount();
+
+        int limit = getLimit(config, params);
+        int start = parseInt(params.get("start"), 0);
+
+        view.recycle();
+        db.recycle();
+
+        return viewName + "|" + dbModified + "|" + entryCount + "|" + start + "|" + limit;
+    }
+
     public static Object getData(
         Map<String, Object> config,
         Map<String, String> params
