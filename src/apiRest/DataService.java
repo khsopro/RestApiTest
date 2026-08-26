@@ -14,10 +14,11 @@ import org.json.JSONObject;
 public class DataService {
 
     /**
-     * Billiger Fingerabdruck des Ergebnisses (DB-LastModified + View-EntryCount
-     * + Paginierungsparameter), ohne die View zu durchlaufen. Dient als Basis
-     * fuer den ETag, damit der teure JSON-Aufbau nur bei tatsaechlicher
-     * Aenderung angestossen wird.
+     * Fingerabdruck des Ergebnisses fuer den ETag: durchlaeuft dieselbe Seite
+     * (start/limit) wie getData(), liest je Eintrag aber nur getLastModified()
+     * statt die Felder zu konvertieren und JSON aufzubauen. Erkennt damit auch
+     * replizierte Aenderungen (anders als Database.getLastModified()) und ist
+     * trotz zweitem View-Durchlauf deutlich guenstiger als der volle JSON-Aufbau.
      */
     public static String getCacheKey(
         Map<String, Object> config,
@@ -32,19 +33,41 @@ public class DataService {
         View view = db.getView(viewName);
         view.setAutoUpdate(false);
 
-        DateTime modified = db.getLastModified();
-        long dbModified = modified.toJavaDate().getTime();
-        modified.recycle();
-
-        int entryCount = view.getEntryCount();
-
         int limit = getLimit(config, params);
         int start = parseInt(params.get("start"), 0);
+
+        ViewNavigator nav = view.createViewNav();
+        ViewEntry entry = nav.getNth(start + 1);
+
+        long latest = 0;
+        int count = 0;
+
+        while(entry != null && count < limit) {
+
+            if(entry.isCategory()) {
+                entry = nav.getNext(entry);
+                continue;
+            }
+
+            DateTime modified = entry.getLastModified();
+            long modifiedMillis = modified.toJavaDate().getTime();
+            modified.recycle();
+
+            if(modifiedMillis > latest) {
+                latest = modifiedMillis;
+            }
+
+            ViewEntry tmp = nav.getNext(entry);
+            entry.recycle();
+            entry = tmp;
+
+            count++;
+        }
 
         view.recycle();
         db.recycle();
 
-        return viewName + "|" + dbModified + "|" + entryCount + "|" + start + "|" + limit;
+        return viewName + "|" + start + "|" + limit + "|" + count + "|" + latest;
     }
 
     public static Object getData(
