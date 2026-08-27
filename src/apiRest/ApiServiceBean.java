@@ -28,6 +28,12 @@ public class ApiServiceBean {
         	response = (HttpServletResponse) fc.getExternalContext().getResponse();
         	response.setContentType("application/json; charset=UTF-8");
 
+        	// Erzwingt Revalidierung bei jedem Aufruf, statt dass der Browser
+        	// die Antwort ungeprueft aus dem Cache liefert oder sie mangels
+        	// Cache-Control gar nicht erst speichert (sonst kommt nie ein
+        	// If-None-Match zurueck).
+        	response.setHeader("Cache-Control", "no-cache, private");
+
         	response.setStatus(HttpServletResponse.SC_OK);
         	writer = response.getWriter();
 
