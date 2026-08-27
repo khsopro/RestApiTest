@@ -64,9 +64,11 @@ public class DataService {
                 continue;
             }
 
-            DateTime modified = entry.getLastModified();
+            Document doc = entry.getDocument();
+            DateTime modified = doc.getLastModified();
             long modifiedMillis = modified.toJavaDate().getTime();
             modified.recycle();
+            doc.recycle();
 
             if(modifiedMillis > latest) {
                 latest = modifiedMillis;
