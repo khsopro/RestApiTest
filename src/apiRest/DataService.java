@@ -76,6 +76,21 @@ public class DataService {
     ) throws Exception {
 
         Session session = (Session) ExtLibUtil.resolveVariable("session");
+        return getData(session, config, params);
+    }
+
+    /**
+     * Wie getData(config, params), nimmt die Session aber als Parameter statt
+     * sie ueber ExtLibUtil aus dem XPages-Kontext zu holen. Dadurch nutzbar
+     * auch ausserhalb von XPages-Requests, z.B. aus einem Domino-Agenten
+     * (kein FacesContext vorhanden).
+     */
+    public static Object getData(
+        Session session,
+        Map<String, Object> config,
+        Map<String, String> params
+    ) throws Exception {
+
         Database db = session.getCurrentDatabase();
 
         String viewName = (String) config.get("view");
