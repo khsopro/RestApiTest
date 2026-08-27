@@ -6,7 +6,6 @@ import java.time.Instant;
 import lotus.domino.*;
 
 import com.ibm.icu.text.SimpleDateFormat;
-import com.ibm.xsp.extlib.util.ExtLibUtil;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -19,21 +18,6 @@ public class DataService {
      * statt die Felder zu konvertieren und JSON aufzubauen. Erkennt damit auch
      * replizierte Aenderungen (anders als Database.getLastModified()) und ist
      * trotz zweitem View-Durchlauf deutlich guenstiger als der volle JSON-Aufbau.
-     */
-    public static String getCacheKey(
-        Map<String, Object> config,
-        Map<String, String> params
-    ) throws Exception {
-
-        Session session = (Session) ExtLibUtil.resolveVariable("session");
-        return getCacheKey(session, config, params);
-    }
-
-    /**
-     * Wie getCacheKey(config, params), nimmt die Session aber als Parameter
-     * statt sie ueber ExtLibUtil aus dem XPages-Kontext zu holen - analog zu
-     * getData(Session, config, params), damit auch diese Methode ausserhalb
-     * eines XPages-Requests (z.B. aus einem Agenten) nutzbar ist.
      */
     public static String getCacheKey(
         Session session,
@@ -87,21 +71,6 @@ public class DataService {
         return viewName + "|" + start + "|" + limit + "|" + count + "|" + latest;
     }
 
-    public static Object getData(
-        Map<String, Object> config,
-        Map<String, String> params
-    ) throws Exception {
-
-        Session session = (Session) ExtLibUtil.resolveVariable("session");
-        return getData(session, config, params);
-    }
-
-    /**
-     * Wie getData(config, params), nimmt die Session aber als Parameter statt
-     * sie ueber ExtLibUtil aus dem XPages-Kontext zu holen. Dadurch nutzbar
-     * auch ausserhalb von XPages-Requests, z.B. aus einem Domino-Agenten
-     * (kein FacesContext vorhanden).
-     */
     public static Object getData(
         Session session,
         Map<String, Object> config,

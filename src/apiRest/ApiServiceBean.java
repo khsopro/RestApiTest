@@ -43,14 +43,16 @@ public class ApiServiceBean {
 
             Map<String, String> params = fc.getExternalContext().getRequestParameterMap();
 
-            Map<String, Object> config = getConfig(endpoint);
+            Session session = (Session) ExtLibUtil.resolveVariable("session");
+
+            Map<String, Object> config = getConfig(session, endpoint);
 
             if(config == null) {
                 writeError(writer, "Unknown endpoint");
                 return;
             }
 
-            Document cacheDoc = getCacheDocument(endpoint);
+            Document cacheDoc = getCacheDocument(session, endpoint);
 
             try {
                 // Bevorzugt: ETag kommt direkt aus dem vom ApiCacheAgent
@@ -63,7 +65,7 @@ public class ApiServiceBean {
                     : null;
 
                 if(etag == null || etag.isEmpty()) {
-                    etag = generateETag(DataService.getCacheKey(config, params));
+                    etag = generateETag(DataService.getCacheKey(session, config, params));
                 }
 
                 if(etag != null) {
@@ -81,7 +83,7 @@ public class ApiServiceBean {
 
                 if(json == null) {
                     // Kein (nutzbares) Cache-Dokument -> wie bisher live aufbauen
-                    Object data = DataService.getData(config, params);
+                    Object data = DataService.getData(session, config, params);
                     json = data.toString();
                 }
 
@@ -127,9 +129,8 @@ public class ApiServiceBean {
      * (noch) nicht, wird null zurueckgegeben und handleRequest() faellt
      * auf die alte Live-Berechnung zurueck - kein Fehler.
      */
-    private Document getCacheDocument(String endpoint) {
+    private Document getCacheDocument(Session session, String endpoint) {
         try {
-            Session session = (Session) ExtLibUtil.resolveVariable("session");
             Database db = session.getCurrentDatabase();
 
             View cacheView = db.getView("vwApiCache");
@@ -259,9 +260,8 @@ public class ApiServiceBean {
 
     // -------- CONFIG LOADING --------
 
-    private Map<String, Object> getConfig(String key) throws Exception {
+    private Map<String, Object> getConfig(Session session, String key) throws Exception {
 
-    	Session session = (Session) ExtLibUtil.resolveVariable("session");
         Database db = session.getCurrentDatabase();
 
         View view = db.getView("vwVariableAll");
