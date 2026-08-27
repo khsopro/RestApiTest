@@ -50,23 +50,48 @@ public class ApiServiceBean {
                 return;
             }
 
-            String cacheKey = DataService.getCacheKey(config, params);
-            String etag = generateETag(cacheKey);
+            Document cacheDoc = getCacheDocument(endpoint);
 
-            if(etag != null) {
-                response.setHeader("ETag", etag);
+            try {
+                // Bevorzugt: ETag kommt direkt aus dem vom ApiCacheAgent
+                // vorgebauten Cache-Dokument, kein View-Zugriff noetig.
+                // Fallback (kein Cache-Dokument vorhanden, z.B. neuer
+                // Endpoint oder Agent noch nicht gelaufen): wie bisher live
+                // per Zweitdurchlauf ermitteln.
+                String etag = (cacheDoc != null)
+                    ? cacheDoc.getItemValueString("ETag")
+                    : null;
+
+                if(etag == null || etag.isEmpty()) {
+                    etag = generateETag(DataService.getCacheKey(config, params));
+                }
+
+                if(etag != null) {
+                    response.setHeader("ETag", etag);
+                }
+
+                String ifNoneMatch = req.getHeader("If-None-Match");
+
+                if(etag != null && matchesETag(ifNoneMatch, etag)) {
+                    response.setStatus(HttpServletResponse.SC_NOT_MODIFIED);
+                    return;
+                }
+
+                String json = (cacheDoc != null) ? readCachedJson(cacheDoc) : null;
+
+                if(json == null) {
+                    // Kein (nutzbares) Cache-Dokument -> wie bisher live aufbauen
+                    Object data = DataService.getData(config, params);
+                    json = data.toString();
+                }
+
+                writer.write(json);
+
+            } finally {
+                if(cacheDoc != null) {
+                    cacheDoc.recycle();
+                }
             }
-
-            String ifNoneMatch = req.getHeader("If-None-Match");
-
-            if(etag != null && matchesETag(ifNoneMatch, etag)) {
-                response.setStatus(HttpServletResponse.SC_NOT_MODIFIED);
-                return;
-            }
-
-            // Erst ab hier wird tatsaechlich der teure JSON-Aufbau angestossen
-            Object data = DataService.getData(config, params);
-            writer.write(data.toString());
 
         } catch (Exception e) {
            StringWriter sw = new StringWriter();
@@ -91,6 +116,53 @@ public class ApiServiceBean {
         }
 
         return part.toLowerCase();
+    }
+
+    // -------- CACHE DOCUMENT (ApiCacheAgent) --------
+
+    /**
+     * Sucht das vom ApiCacheAgent vorgebaute Cache-Dokument fuer den
+     * Endpoint ueber die View vwApiCache (Selektion Form="ApiCache",
+     * sortiert nach Endpoint). Existiert die View oder das Dokument
+     * (noch) nicht, wird null zurueckgegeben und handleRequest() faellt
+     * auf die alte Live-Berechnung zurueck - kein Fehler.
+     */
+    private Document getCacheDocument(String endpoint) {
+        try {
+            Session session = (Session) ExtLibUtil.resolveVariable("session");
+            Database db = session.getCurrentDatabase();
+
+            View cacheView = db.getView("vwApiCache");
+
+            if(cacheView == null) {
+                return null;
+            }
+
+            cacheView.setAutoUpdate(false);
+            Document doc = cacheView.getDocumentByKey(endpoint, true);
+            cacheView.recycle();
+
+            return doc;
+
+        } catch(Exception e) {
+            return null;
+        }
+    }
+
+    private String readCachedJson(Document cacheDoc) {
+        try {
+            MIMEEntity body = cacheDoc.getMIMEEntity("Json");
+
+            if(body == null) {
+                return null;
+            }
+
+            return body.getContentAsText();
+
+        } catch(Exception e) {
+            e.printStackTrace();
+            return null;
+        }
     }
 
     // -------- ETAG HANDLING --------
