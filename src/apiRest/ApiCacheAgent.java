@@ -1,22 +1,37 @@
 package apiRest;
 
 import java.security.MessageDigest;
+import java.text.ParseException;
+import java.time.Instant;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Vector;
 
 import lotus.domino.*;
 
+import com.ibm.icu.text.SimpleDateFormat;
 import com.ibm.commons.util.io.json.*;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 /**
  * Scheduled Agent: baut fuer jeden in vwVariableAll definierten Endpoint das
- * JSON einmalig vor (mit DataService.getData(), derselben Logik wie der
- * Live-Endpoint) und legt es zusammen mit dem passenden ETag in einem
- * Cache-Dokument ab. ApiServiceBean bleibt davon unberuehrt und bedient
- * weiterhin live aus der View - dieser Agent ist reine Zusatz-Infrastruktur
- * fuer eine spaetere Umstellung auf "aus Cache-Dokument lesen".
+ * JSON einmalig vor (via AgentDataService.getData(), unten in dieser Datei)
+ * und legt es zusammen mit dem passenden ETag in einem Cache-Dokument ab.
+ * ApiServiceBean bleibt davon unberuehrt und bedient weiterhin live aus der
+ * View, falls (noch) kein Cache-Dokument existiert.
+ *
+ * Java-Agents in Domino Designer haben einen eigenen, von Code/Java
+ * isolierten Klassenpfad und koennen weder auf lose Klassen unter Code/Java
+ * noch auf Script Libraries zugreifen. Deshalb ist die Bau-Logik hier als
+ * eigene Klasse AgentDataService dupliziert statt die geteilte DataService
+ * (Code/Java, von ApiServiceBean genutzt) zu referenzieren. Aendert sich die
+ * Feldkonvertierung/JSON-Struktur, muss das an beiden Stellen gepflegt
+ * werden.
  */
 public class ApiCacheAgent extends AgentBase {
 
@@ -89,7 +104,7 @@ public class ApiCacheAgent extends AgentBase {
         configDoc.recycle();
         configView.recycle();
 
-        Object data = DataService.getData(session, config, new HashMap<String, String>());
+        Object data = AgentDataService.getData(session, config, new HashMap<String, String>());
         String json = data.toString();
         String etag = hashETag(json);
 
@@ -156,6 +171,232 @@ public class ApiCacheAgent extends AgentBase {
 
         } catch (Exception e) {
             return null;
+        }
+    }
+}
+
+/**
+ * Eigenstaendige Kopie der Bau-Logik aus DataService (Code/Java), nur fuer
+ * ApiCacheAgent - siehe Klassenkommentar oben, warum dupliziert statt
+ * referenziert.
+ */
+class AgentDataService {
+
+    static Object getData(
+        Session session,
+        Map<String, Object> config,
+        Map<String, String> params
+    ) throws Exception {
+
+        Database db = session.getCurrentDatabase();
+
+        String viewName = (String) config.get("view");
+        String jsonType = (String) config.get("art");
+
+        if(jsonType == null) jsonType = "obj";
+
+        View view = db.getView(viewName);
+        view.setAutoUpdate(false);
+
+        int limit = getLimit(config, params);
+        int start = parseInt(params.get("start"), 0);
+
+        ViewNavigator nav = view.createViewNav();
+        ViewEntry entry = nav.getNth(start + 1);
+
+        JSONArray flat = new JSONArray();
+        Map<String, JSONArray> groups = new LinkedHashMap<>();
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> fields =
+            (List<Map<String, Object>>) config.get("fields");
+
+        int categoryCol = config.containsKey("titlecol")
+                ? ((Number) config.get("titlecol")).intValue()
+                : -1;
+
+        int count = 0;
+
+        while(entry != null && count < limit) {
+
+            if(entry.isCategory()) {
+                entry = nav.getNext(entry);
+                continue;
+            }
+
+            Vector values = entry.getColumnValues();
+
+            String category = "default";
+            if(categoryCol >= 0 && categoryCol < values.size() && values.get(categoryCol) != null) {
+                category = values.get(categoryCol).toString();
+            }
+
+            JSONObject obj = new JSONObject();
+
+            for(Map<String, Object> f : fields) {
+
+                int col = ((Number) f.get("column")).intValue();
+                String json = (String) f.get("json");
+                String type = (String) f.get("type");
+
+                Object raw = (col < values.size()) ? values.get(col) : null;
+
+                obj.put(json, convertValue(raw, type));
+            }
+
+            if("obj".equals(jsonType) || "both".equals(jsonType)) {
+                flat.put(obj);
+            }
+
+            if("arr".equals(jsonType) || "both".equals(jsonType)) {
+
+                JSONArray arr = groups.get(category);
+
+                if(arr == null) {
+                    arr = new JSONArray();
+                    groups.put(category, arr);
+                }
+
+                arr.put(obj);
+            }
+
+            ViewEntry tmp = nav.getNext(entry);
+            entry.recycle();
+            entry = tmp;
+
+            count++;
+        }
+
+        view.recycle();
+        db.recycle();
+
+        if("obj".equals(jsonType)) {
+            return flat;
+        }
+
+        if("arr".equals(jsonType)) {
+            JSONObject grouped = new JSONObject();
+            for(Map.Entry<String, JSONArray> e : groups.entrySet()) {
+                grouped.put(e.getKey(), e.getValue());
+            }
+            return grouped;
+        }
+
+        if("both".equals(jsonType)) {
+            JSONObject result = new JSONObject();
+
+            JSONObject grouped = new JSONObject();
+            for(Map.Entry<String, JSONArray> e : groups.entrySet()) {
+                grouped.put(e.getKey(), e.getValue());
+            }
+
+            result.put("obj", flat);
+            result.put("arr", grouped);
+
+            return result;
+        }
+
+        return flat;
+    }
+
+    private static Object convertValue(Object raw, String type)
+            throws NotesException {
+
+        if(raw == null) {
+            return JSONObject.NULL;
+        }
+
+        if(raw instanceof Vector) {
+            JSONArray arr = new JSONArray();
+            for(Object v : (Vector) raw) {
+                arr.put(v != null ? v.toString() : JSONObject.NULL);
+            }
+            return arr;
+        }
+
+        switch(type) {
+
+            case "jsonarray":
+                try {
+                    return new JSONArray(raw.toString());
+                } catch (Exception e) {
+                    return new JSONArray();
+                }
+
+            case "jsonobject":
+                try {
+                    return new JSONObject(raw.toString());
+                } catch (Exception e) {
+                    return new JSONObject();
+                }
+
+            case "number":
+                if(raw instanceof Number) {
+                    return ((Number) raw).doubleValue();
+                }
+                return Double.parseDouble(raw.toString());
+
+            case "boolean":
+                if(raw instanceof Number) {
+                    return ((Number) raw).intValue() == 1;
+                }
+                return Boolean.parseBoolean(raw.toString());
+
+            case "date":
+                if(raw instanceof DateTime) {
+                    return ((DateTime) raw).getGMTTime();
+                }
+                return raw.toString();
+
+            case "unixdate":
+
+                if(raw instanceof DateTime) {
+                    return ((DateTime) raw).toJavaDate().getTime() / 1000;
+                } else if(raw instanceof String) {
+                    try {
+                        Instant instant = java.time.Instant.parse((String) raw);
+                        return instant.getEpochSecond();
+                    } catch(Exception e) {
+                        SimpleDateFormat sdf = new SimpleDateFormat("dd.MM.yyyy HH:mm:ss");
+                        java.util.Date date = null;
+                        try {
+                            date = sdf.parse((String) raw);
+                        } catch (ParseException e1) {
+                            e1.printStackTrace();
+                        }
+
+                        return date.toInstant().getEpochSecond();
+                    }
+                }
+
+                return raw.toString();
+
+            case "string":
+            default:
+                return raw.toString();
+        }
+    }
+
+    private static int getLimit(Map<String, Object> config, Map<String, String> params) {
+
+        int def = 5000;
+        int max = 20000;
+
+        if(config.containsKey("limit")) {
+            Map limitCfg = (Map) config.get("limit");
+            def = ((Number) limitCfg.get("default")).intValue();
+            max = ((Number) limitCfg.get("max")).intValue();
+        }
+
+        int req = parseInt(params.get("limit"), def);
+        return Math.min(req, max);
+    }
+
+    private static int parseInt(String val, int def) {
+        try {
+            return val != null ? Integer.parseInt(val) : def;
+        } catch(Exception e) {
+            return def;
         }
     }
 }
