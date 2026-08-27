@@ -26,6 +26,21 @@ public class DataService {
     ) throws Exception {
 
         Session session = (Session) ExtLibUtil.resolveVariable("session");
+        return getCacheKey(session, config, params);
+    }
+
+    /**
+     * Wie getCacheKey(config, params), nimmt die Session aber als Parameter
+     * statt sie ueber ExtLibUtil aus dem XPages-Kontext zu holen - analog zu
+     * getData(Session, config, params), damit auch diese Methode ausserhalb
+     * eines XPages-Requests (z.B. aus einem Agenten) nutzbar ist.
+     */
+    public static String getCacheKey(
+        Session session,
+        Map<String, Object> config,
+        Map<String, String> params
+    ) throws Exception {
+
         Database db = session.getCurrentDatabase();
 
         String viewName = (String) config.get("view");
