@@ -20,15 +20,17 @@ import org.json.JSONObject;
 
 /**
  * Scheduled Agent: baut fuer jeden in vwVariableAll definierten Endpoint das
- * JSON einmalig vor (via AgentDataService.getData(), unten in dieser Datei)
- * und legt es zusammen mit dem passenden ETag in einem Cache-Dokument ab.
- * ApiServiceBean bleibt davon unberuehrt und bedient weiterhin live aus der
- * View, falls (noch) kein Cache-Dokument existiert.
+ * JSON einmalig vor (getData() unten, gleiche Logik wie DataService.getData()
+ * unter Code/Java) und legt es zusammen mit dem passenden ETag in einem
+ * Cache-Dokument ab. ApiServiceBean bleibt davon unberuehrt und bedient
+ * weiterhin live aus der View, falls (noch) kein Cache-Dokument existiert.
  *
- * Java-Agents in Domino Designer haben einen eigenen, von Code/Java
- * isolierten Klassenpfad und koennen weder auf lose Klassen unter Code/Java
- * noch auf Script Libraries zugreifen. Deshalb ist die Bau-Logik hier als
- * eigene Klasse AgentDataService dupliziert statt die geteilte DataService
+ * Java-Agents in dieser Domino-Umgebung akzeptieren nur genau eine
+ * kompilierte Klasse - weder eine zweite Top-Level-Klasse in derselben Datei
+ * noch eine statische verschachtelte Klasse funktionierten (erstere gab zur
+ * Laufzeit "NotesContext not initialized for the thread", letztere bereits
+ * einen Kompilierfehler). Deshalb ist die Bau-Logik hier direkt als private
+ * Methoden auf ApiCacheAgent dupliziert statt die geteilte DataService
  * (Code/Java, von ApiServiceBean genutzt) zu referenzieren. Aendert sich die
  * Feldkonvertierung/JSON-Struktur, muss das an beiden Stellen gepflegt
  * werden.
@@ -104,7 +106,7 @@ public class ApiCacheAgent extends AgentBase {
         configDoc.recycle();
         configView.recycle();
 
-        Object data = AgentDataService.getData(session, config, new HashMap<String, String>());
+        Object data = getData(session, config, new HashMap<String, String>());
         String json = data.toString();
         String etag = hashETag(json);
 
@@ -174,20 +176,9 @@ public class ApiCacheAgent extends AgentBase {
         }
     }
 
-    /**
-     * Eigenstaendige Kopie der Bau-Logik aus DataService (Code/Java), nur
-     * fuer ApiCacheAgent - siehe Klassenkommentar oben, warum dupliziert
-     * statt referenziert. Als statische verschachtelte Klasse (nicht als
-     * zweite Top-Level-Klasse in der Datei), damit sie garantiert Teil
-     * derselben kompilierten Agent-Klasse ist - eine lose zweite Top-Level-
-     * Klasse in der Agent-Datei fuehrte zur Laufzeit zu
-     * "NotesContext not initialized for the thread", vermutlich weil
-     * Designer beim Agent-Deployment nur die zum Agent gehoerende Klasse
-     * sicher mitnimmt.
-     */
-    private static class AgentDataService {
+    // -------- DATENAUFBAU (Kopie der Logik aus DataService, siehe Klassenkommentar) --------
 
-    static Object getData(
+    private Object getData(
         Session session,
         Map<String, Object> config,
         Map<String, String> params
@@ -304,7 +295,7 @@ public class ApiCacheAgent extends AgentBase {
         return flat;
     }
 
-    private static Object convertValue(Object raw, String type)
+    private Object convertValue(Object raw, String type)
             throws NotesException {
 
         if(raw == null) {
@@ -382,7 +373,7 @@ public class ApiCacheAgent extends AgentBase {
         }
     }
 
-    private static int getLimit(Map<String, Object> config, Map<String, String> params) {
+    private int getLimit(Map<String, Object> config, Map<String, String> params) {
 
         int def = 5000;
         int max = 20000;
@@ -397,12 +388,11 @@ public class ApiCacheAgent extends AgentBase {
         return Math.min(req, max);
     }
 
-    private static int parseInt(String val, int def) {
+    private int parseInt(String val, int def) {
         try {
             return val != null ? Integer.parseInt(val) : def;
         } catch(Exception e) {
             return def;
         }
-    }
     }
 }
