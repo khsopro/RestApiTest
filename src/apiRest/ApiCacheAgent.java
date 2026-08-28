@@ -173,14 +173,19 @@ public class ApiCacheAgent extends AgentBase {
             return null;
         }
     }
-}
 
-/**
- * Eigenstaendige Kopie der Bau-Logik aus DataService (Code/Java), nur fuer
- * ApiCacheAgent - siehe Klassenkommentar oben, warum dupliziert statt
- * referenziert.
- */
-class AgentDataService {
+    /**
+     * Eigenstaendige Kopie der Bau-Logik aus DataService (Code/Java), nur
+     * fuer ApiCacheAgent - siehe Klassenkommentar oben, warum dupliziert
+     * statt referenziert. Als statische verschachtelte Klasse (nicht als
+     * zweite Top-Level-Klasse in der Datei), damit sie garantiert Teil
+     * derselben kompilierten Agent-Klasse ist - eine lose zweite Top-Level-
+     * Klasse in der Agent-Datei fuehrte zur Laufzeit zu
+     * "NotesContext not initialized for the thread", vermutlich weil
+     * Designer beim Agent-Deployment nur die zum Agent gehoerende Klasse
+     * sicher mitnimmt.
+     */
+    private static class AgentDataService {
 
     static Object getData(
         Session session,
@@ -398,5 +403,6 @@ class AgentDataService {
         } catch(Exception e) {
             return def;
         }
+    }
     }
 }
