@@ -64,7 +64,15 @@ public class ApiCacheAgent extends AgentBase {
 
                     if(endpoint != null && !endpoint.isEmpty()) {
                         try {
-                            buildAndStore(session, db, endpoint);
+                            // Dokument direkt vom Entry holen statt ueber
+                            // einen zweiten db.getView(CONFIG_VIEW)-Handle:
+                            // Domino gibt bei gleichem Viewnamen oft denselben
+                            // gecachten Handle zurueck - ein Recycle davon in
+                            // buildAndStore() hat hier die View invalidiert,
+                            // aus der nav/entry noch iteriert wurden
+                            // ("Entry removed or recycled").
+                            Document configDoc = entry.getDocument();
+                            buildAndStore(session, db, endpoint, configDoc);
                         } catch(Exception e) {
                             System.out.println("ApiCacheAgent: Fehler bei Endpoint '" + endpoint + "': " + e);
                             e.printStackTrace();
@@ -85,13 +93,9 @@ public class ApiCacheAgent extends AgentBase {
         }
     }
 
-    private void buildAndStore(Session session, Database db, String endpoint) throws Exception {
-
-        View configView = db.getView(CONFIG_VIEW);
-        Document configDoc = configView.getDocumentByKey(endpoint, true);
+    private void buildAndStore(Session session, Database db, String endpoint, Document configDoc) throws Exception {
 
         if(configDoc == null) {
-            configView.recycle();
             return;
         }
 
@@ -110,12 +114,10 @@ public class ApiCacheAgent extends AgentBase {
                 + "Laenge=" + (configJson != null ? configJson.length() : -1)
                 + " Inhalt='" + configJson + "'");
             configDoc.recycle();
-            configView.recycle();
             throw e;
         }
 
         configDoc.recycle();
-        configView.recycle();
 
         Object data = getData(session, config, new HashMap<String, String>());
         String json = data.toString();
