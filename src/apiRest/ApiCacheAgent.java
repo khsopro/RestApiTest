@@ -98,10 +98,21 @@ public class ApiCacheAgent extends AgentBase {
         String configJson = configDoc.getItemValueString("ConfigJson");
 
         @SuppressWarnings("unchecked")
-        Map<String, Object> config =
-            (Map<String, Object>) JsonParser.fromJson(
+        Map<String, Object> config;
+
+        try {
+            config = (Map<String, Object>) JsonParser.fromJson(
                 JsonJavaFactory.instanceEx, configJson
             );
+        } catch(Exception e) {
+            System.out.println("ApiCacheAgent: ConfigJson fuer Endpoint '" + endpoint
+                + "' (Dokument " + configDoc.getUniversalID() + ") ist kein gueltiges JSON. "
+                + "Laenge=" + (configJson != null ? configJson.length() : -1)
+                + " Inhalt='" + configJson + "'");
+            configDoc.recycle();
+            configView.recycle();
+            throw e;
+        }
 
         configDoc.recycle();
         configView.recycle();
