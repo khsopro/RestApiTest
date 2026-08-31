@@ -39,6 +39,7 @@ public class ApiCacheAgent extends AgentBase {
 
     private static final String CACHE_FORM = "ApiCache";
     private static final String CONFIG_VIEW = "vwVariableAll";
+    private static final String DEFAULT_CACHE_VIEW = "vwApiCache";
 
     public void NotesMain() {
 
@@ -123,7 +124,7 @@ public class ApiCacheAgent extends AgentBase {
         String json = data.toString();
         String etag = hashETag(json);
 
-        Document cacheDoc = findCacheDocument(db, endpoint);
+        Document cacheDoc = findCacheDocument(db, endpoint, config);
 
         if(cacheDoc == null) {
             cacheDoc = db.createDocument();
@@ -139,14 +140,29 @@ public class ApiCacheAgent extends AgentBase {
         cacheDoc.recycle();
     }
 
-    private Document findCacheDocument(Database db, String endpoint) throws Exception {
+    /**
+     * Sucht ein vorhandenes Cache-Dokument fuer den Endpoint ueber dieselbe,
+     * im Config-JSON konfigurierbare View wie ApiServiceBean.getCacheDocument()
+     * (Schluessel "cacheView", Fallback DEFAULT_CACHE_VIEW) - schneller,
+     * indexierter Lookup statt datenbankweitem Formel-Scan, und konsistent
+     * mit dem XPages-Lesepfad.
+     */
+    private Document findCacheDocument(Database db, String endpoint, Map<String, Object> config) throws Exception {
 
-        String safeEndpoint = endpoint.replace("\"", "\\\"");
-        String formula = "Form=\"" + CACHE_FORM + "\" & Endpoint=\"" + safeEndpoint + "\"";
+        String cacheViewName = (String) config.get("cacheView");
+        if(cacheViewName == null || cacheViewName.trim().isEmpty()) {
+            cacheViewName = DEFAULT_CACHE_VIEW;
+        }
 
-        DocumentCollection dc = db.search(formula, null, 0);
-        Document doc = (dc.getCount() > 0) ? dc.getFirstDocument() : null;
-        dc.recycle();
+        View cacheView = db.getView(cacheViewName);
+
+        if(cacheView == null) {
+            return null;
+        }
+
+        cacheView.setAutoUpdate(false);
+        Document doc = cacheView.getDocumentByKey(endpoint, true);
+        cacheView.recycle();
 
         return doc;
     }
