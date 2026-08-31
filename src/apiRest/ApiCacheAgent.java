@@ -1,5 +1,7 @@
 package apiRest;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.security.MessageDigest;
 import java.text.ParseException;
 import java.time.Instant;
@@ -40,6 +42,7 @@ public class ApiCacheAgent extends AgentBase {
     private static final String CACHE_FORM = "ApiCache";
     private static final String CONFIG_VIEW = "vwVariableAll";
     private static final String DEFAULT_CACHE_VIEW = "vwApiCache";
+    private static final String KEEPWEB_SUBDIR = "apicache";
 
     public void NotesMain() {
 
@@ -138,6 +141,58 @@ public class ApiCacheAgent extends AgentBase {
         cacheDoc.replaceItemValue("LastBuilt", session.createDateTime(new Date()));
         cacheDoc.save(true, false);
         cacheDoc.recycle();
+
+        // Zusaetzlich, best effort: statische Kopie nach keepweb.d, damit die
+        // HCL Domino REST API (Keep) sie direkt unter /keepweb/ ausliefern
+        // kann, ganz ohne XPages/ApiServiceBean. Schlaegt das fehl, bricht
+        // es den Agent-Lauf fuer diesen Endpoint nicht ab - das Notes-
+        // Cache-Dokument oben ist bereits erfolgreich geschrieben.
+        writeKeepwebFile(session, endpoint, json);
+    }
+
+    /**
+     * Schreibt das JSON zusaetzlich als statische Datei nach
+     * <DominoDatenverzeichnis>/keepweb.d/apicache/<endpoint>.json, damit es
+     * ueber die HCL Domino REST API (Keep) direkt unter /keepweb/ erreichbar
+     * ist. Rein additiv und best effort: Fehler (z.B. Verzeichnis nicht
+     * beschreibbar) werden nur geloggt, nicht weitergeworfen.
+     */
+    private void writeKeepwebFile(Session session, String endpoint, String json) {
+        try {
+            String dataDir = session.getEnvironmentString("Directory", true);
+
+            if(dataDir == null || dataDir.trim().isEmpty()) {
+                System.out.println("ApiCacheAgent: Domino-Datenverzeichnis nicht ermittelbar, keepweb.d-Export fuer '"
+                    + endpoint + "' uebersprungen.");
+                return;
+            }
+
+            String safeEndpoint = endpoint.replaceAll("[^a-z0-9_-]", "");
+
+            if(safeEndpoint.isEmpty()) {
+                return;
+            }
+
+            File dir = new File(dataDir, "keepweb.d" + File.separator + KEEPWEB_SUBDIR);
+
+            if(!dir.exists() && !dir.mkdirs()) {
+                System.out.println("ApiCacheAgent: Konnte Verzeichnis '" + dir.getAbsolutePath() + "' nicht anlegen.");
+                return;
+            }
+
+            File target = new File(dir, safeEndpoint + ".json");
+
+            FileOutputStream out = new FileOutputStream(target);
+            try {
+                out.write(json.getBytes("UTF-8"));
+            } finally {
+                out.close();
+            }
+
+        } catch(Exception e) {
+            System.out.println("ApiCacheAgent: keepweb.d-Export fuer Endpoint '" + endpoint + "' fehlgeschlagen: " + e);
+            e.printStackTrace();
+        }
     }
 
     /**
