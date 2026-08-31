@@ -52,7 +52,7 @@ public class ApiServiceBean {
                 return;
             }
 
-            Document cacheDoc = getCacheDocument(session, endpoint);
+            Document cacheDoc = getCacheDocument(session, endpoint, config);
 
             try {
                 // Bevorzugt: ETag kommt direkt aus dem vom ApiCacheAgent
@@ -122,18 +122,27 @@ public class ApiServiceBean {
 
     // -------- CACHE DOCUMENT (ApiCacheAgent) --------
 
+    private static final String DEFAULT_CACHE_VIEW = "vwApiCache";
+
     /**
      * Sucht das vom ApiCacheAgent vorgebaute Cache-Dokument fuer den
-     * Endpoint ueber die View vwApiCache (Selektion Form="ApiCache",
-     * sortiert nach Endpoint). Existiert die View oder das Dokument
-     * (noch) nicht, wird null zurueckgegeben und handleRequest() faellt
-     * auf die alte Live-Berechnung zurueck - kein Fehler.
+     * Endpoint ueber die im Config-JSON hinterlegte View (Schluessel
+     * "cacheView", faellt auf DEFAULT_CACHE_VIEW zurueck, falls der
+     * Schluessel in einer Config fehlt). Selektion dort Form="ApiCache",
+     * sortiert nach Endpoint. Existiert die View oder das Dokument (noch)
+     * nicht, wird null zurueckgegeben und handleRequest() faellt auf die
+     * alte Live-Berechnung zurueck - kein Fehler.
      */
-    private Document getCacheDocument(Session session, String endpoint) {
+    private Document getCacheDocument(Session session, String endpoint, Map<String, Object> config) {
         try {
             Database db = session.getCurrentDatabase();
 
-            View cacheView = db.getView("vwApiCache");
+            String cacheViewName = (String) config.get("cacheView");
+            if(cacheViewName == null || cacheViewName.trim().isEmpty()) {
+                cacheViewName = DEFAULT_CACHE_VIEW;
+            }
+
+            View cacheView = db.getView(cacheViewName);
 
             if(cacheView == null) {
                 return null;
