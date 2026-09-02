@@ -51,6 +51,30 @@ public class ApiCacheAgent extends AgentBase {
             AgentContext agentContext = session.getAgentContext();
             Database db = agentContext.getCurrentDatabase();
 
+            // Gezielter Aufruf, z.B. aus einem Publish-Button per
+            // agent.RunOnServer(configDoc.NoteID): nur dieses eine
+            // Config-Dokument neu bauen statt der kompletten View.
+            Document contextDoc = agentContext.getDocumentContext();
+
+            if(contextDoc != null) {
+                String endpoint = contextDoc.getItemValueString("Titel").trim().toLowerCase();
+
+                if(!endpoint.isEmpty()) {
+                    try {
+                        buildAndStore(session, db, endpoint, contextDoc);
+                    } catch(Exception e) {
+                        System.out.println("ApiCacheAgent: Fehler bei gezieltem Aufruf fuer Endpoint '" + endpoint + "': " + e);
+                        e.printStackTrace();
+                    }
+                } else {
+                    System.out.println("ApiCacheAgent: Gezielter Aufruf ohne 'Titel' im uebergebenen Dokument, uebersprungen.");
+                    contextDoc.recycle();
+                }
+
+                return;
+            }
+
+            // Normaler Voll-Durchlauf, z.B. per Zeitplan-Trigger.
             View configView = db.getView(CONFIG_VIEW);
             configView.setAutoUpdate(false);
 
