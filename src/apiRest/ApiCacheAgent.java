@@ -52,9 +52,18 @@ public class ApiCacheAgent extends AgentBase {
             Database db = agentContext.getCurrentDatabase();
 
             // Gezielter Aufruf, z.B. aus einem Publish-Button per
-            // agent.RunOnServer(configDoc.NoteID): nur dieses eine
-            // Config-Dokument neu bauen statt der kompletten View.
-            Document contextDoc = agentContext.getDocumentContext();
+            // agent.RunOnServer(configDoc.NoteID): die uebergebene NoteID
+            // kommt als ParameterDocID der aktuell laufenden Agent-Instanz
+            // an, NICHT ueber getDocumentContext() - das ist fuer im
+            // Speicher erzeugte Dokumente von C/C++-API-Aufrufern gedacht
+            // und liefert bei einem normalen Run()/RunOnServer(noteId)
+            // immer null.
+            Agent currentAgent = agentContext.getCurrentAgent();
+            String paramDocId = (currentAgent != null) ? currentAgent.getParameterDocID() : null;
+
+            Document contextDoc = (paramDocId != null && !paramDocId.isEmpty())
+                ? db.getDocumentByID(paramDocId)
+                : null;
 
             if(contextDoc != null) {
                 String endpoint = contextDoc.getItemValueString("Titel").trim().toLowerCase();
