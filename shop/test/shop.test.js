@@ -7,10 +7,13 @@ const path = require('node:path');
 const { loadConfig } = require('../src/config');
 const { openDb } = require('../src/db');
 const { createApp } = require('../src/server');
+const { createMailer } = require('../src/mailer');
 const { parsePrice, slugify } = require('../src/util');
 
 let server, base, tmp, repo, cookie;
 const created = [];
+const mails = [];
+const waitFor = async (cond) => { for (let i = 0; i < 50 && !cond(); i++) await new Promise((r) => setTimeout(r, 10)); };
 
 const fakeStripe = {
   checkout: {
@@ -38,9 +41,11 @@ before(async () => {
   const config = loadConfig({
     DATA_DIR: tmp, ADMIN_PASSWORD: 'geheim', SESSION_SECRET: 'x'.repeat(32),
     BASE_URL: 'http://localhost', DOWNLOAD_LIMIT: '2', STRIPE_WEBHOOK_SECRET: 'whsec_test',
+    MAIL_FROM: 'shop@example.com', OWNER_EMAIL: 'autorin@example.com',
   });
   repo = openDb(config);
-  const { app } = createApp({ config, repo, stripe: fakeStripe });
+  const mailer = createMailer(config, { sendMail: async (m) => { mails.push(m); } });
+  const { app } = createApp({ config, repo, stripe: fakeStripe, mailer });
   server = app.listen(0);
   await new Promise((r) => server.once('listening', r));
   base = `http://127.0.0.1:${server.address().port}`;
@@ -111,10 +116,20 @@ test('full purchase flow', async () => {
   const ok = await (await fetch(`${base}/success?session_id=cs_test_1`)).text();
   assert.match(ok, /Danke für deinen Kauf/);
   const token = ok.match(/\/download\/([\w-]+)/)[1];
+  assert.match(ok, /per E-Mail an <strong>leser@example.com/);
+
+  await waitFor(() => mails.length >= 2);
+  const buyerMail = mails.find((m) => m.to === 'leser@example.com');
+  assert.ok(buyerMail, 'buyer gets an email');
+  assert.match(buyerMail.subject, /Der stille Hafen/);
+  assert.ok(buyerMail.text.includes(`http://localhost/download/${token}`));
+  assert.ok(mails.some((m) => m.to === 'autorin@example.com' && /Neuer Verkauf/.test(m.subject)));
 
   // Reloading the success page must not create a second order.
   await fetch(`${base}/success?session_id=cs_test_1`);
   assert.equal(repo.listOrders().length, 1);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(mails.filter((m) => m.to === 'leser@example.com').length, 1, 'email is sent only once');
 
   const dl = await fetch(`${base}/download/${token}`);
   assert.equal(dl.status, 200);
@@ -126,6 +141,22 @@ test('full purchase flow', async () => {
 
   const orders = await (await fetch(`${base}/admin/orders`, { headers: { cookie } })).text();
   assert.match(orders, /leser@example.com/);
+  assert.match(orders, /gesendet/);
+
+  mails.length = 0;
+  const lost = await (await fetch(`${base}/links`, { method: 'POST', body: form({ email: 'LESER@example.com' }) })).text();
+  assert.match(lost, /E-Mail ist unterwegs/);
+  assert.equal(mails.length, 1);
+  assert.ok(mails[0].text.includes(token));
+
+  const unknown = await (await fetch(`${base}/links`, { method: 'POST', body: form({ email: 'niemand@example.com' }) })).text();
+  assert.match(unknown, /E-Mail ist unterwegs/, 'same answer for unknown addresses');
+  assert.equal(mails.length, 1);
+
+  const order = repo.listOrders()[0];
+  const resend = await fetch(`${base}/admin/orders/${order.id}/email`, { method: 'POST', headers: { cookie }, redirect: 'manual' });
+  assert.equal(resend.headers.get('location'), '/admin/orders?msg=mailed');
+  assert.equal(mails.length, 2);
 });
 
 test('webhook rejects invalid signatures', async () => {

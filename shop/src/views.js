@@ -30,6 +30,7 @@ ${body}
     <a href="/datenschutz">Datenschutz</a>
     <a href="/agb">AGB</a>
     <a href="/widerruf">Widerruf</a>
+    ${ctx.mailEnabled ? '<a href="/links">Download-Link verloren?</a>' : ''}
   </div>
 </footer>
 </body>
@@ -111,7 +112,9 @@ function success(ctx, order, p) {
         ${esc(new Date(order.expires_at).toLocaleDateString('de-DE'))}
         und für insgesamt ${ctx.config.downloadLimit} Downloads:</p>
       <p><input class="copy" readonly value="${esc(url)}" onclick="this.select()"></p>
-      ${order.email ? `<p class="muted small">Die Zahlungsbestätigung geht an ${esc(order.email)}.</p>` : ''}
+      ${order.email ? `<p class="muted small">${ctx.mailEnabled
+        ? `Wir haben dir den Link außerdem per E-Mail an <strong>${esc(order.email)}</strong> geschickt.`
+        : `Die Zahlungsbestätigung geht an ${esc(order.email)}.`}</p>` : ''}
     </section>`,
   });
 }
@@ -121,6 +124,22 @@ function message(ctx, title, text, status = '') {
     title,
     body: `<section class="panel center ${status}"><h1>${esc(title)}</h1>${paragraphs(text)}
       <p><a href="/">Zurück zum Shop</a></p></section>`,
+  });
+}
+
+function lostLinks(ctx, { error, email = '' } = {}) {
+  return layout(ctx, {
+    title: 'Download-Link verloren?',
+    body: `
+    <section class="panel narrow">
+      <h1>Download-Link verloren?</h1>
+      <p class="muted">Gib die E-Mail-Adresse ein, die du beim Kauf verwendet hast. Wir schicken dir alle noch gültigen Links.</p>
+      ${error ? `<div class="error">${esc(error)}</div>` : ''}
+      <form method="post" action="/links" class="stack form">
+        <label>E-Mail <input type="email" name="email" value="${esc(email)}" required autofocus></label>
+        <button class="btn">Links zuschicken</button>
+      </form>
+    </section>`,
   });
 }
 
@@ -153,8 +172,10 @@ function adminDashboard(ctx, products, revenue) {
   const totals = revenue.length
     ? revenue.map((r) => `${r.n} Verkäufe · ${formatMoney(r.total, r.currency)}`).join(' / ')
     : 'Noch keine Verkäufe';
-  const warn = ctx.paymentsEnabled ? ''
-    : '<div class="error">STRIPE_SECRET_KEY ist nicht gesetzt – Kunden können noch nicht kaufen.</div>';
+  const warn = (ctx.paymentsEnabled ? ''
+    : '<div class="error">STRIPE_SECRET_KEY ist nicht gesetzt – Kunden können noch nicht kaufen.</div>')
+    + (ctx.mailEnabled ? ''
+      : '<div class="error">E-Mail-Versand ist nicht eingerichtet (SMTP_HOST, MAIL_FROM) – Käufer bekommen ihren Link nur auf der Danke-Seite.</div>');
   const rows = products.map((p) => `
     <tr>
       <td><a href="/admin/products/${p.id}">${esc(p.title)}</a>${p.subtitle ? `<div class="muted small">${esc(p.subtitle)}</div>` : ''}</td>
@@ -230,6 +251,10 @@ function adminOrders(ctx, orders) {
       <td>${esc(o.email)}</td>
       <td>${formatMoney(o.amount_cents, o.currency)}</td>
       <td>${o.downloads} / ${ctx.config.downloadLimit}</td>
+      <td>${o.email_sent_at && o.email_sent_at !== 'pending' ? '<span class="good">gesendet</span>'
+        : o.email_sent_at === 'pending' ? '<span class="muted">wird gesendet</span>' : '<span class="bad">nicht gesendet</span>'}
+        ${ctx.mailEnabled && o.email ? `<form method="post" action="/admin/orders/${o.id}/email" class="inline">
+          <button class="link accent">erneut senden</button></form>` : ''}</td>
       <td><a href="/download/${esc(o.download_token)}" title="Download-Link für Kunden-Support">Link</a></td>
     </tr>`).join('');
   return layout(ctx, {
@@ -239,7 +264,7 @@ function adminOrders(ctx, orders) {
     <div class="toolbar"><h1>Bestellungen</h1></div>
     ${orders.length ? `
     <table>
-      <thead><tr><th>Datum</th><th>Text</th><th>E-Mail</th><th>Betrag</th><th>Downloads</th><th></th></tr></thead>
+      <thead><tr><th>Datum</th><th>Text</th><th>E-Mail</th><th>Betrag</th><th>Downloads</th><th>E-Mail-Versand</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table>` : '<p class="empty">Noch keine Bestellungen.</p>'}`,
   });
@@ -271,6 +296,6 @@ function adminLegal(ctx) {
 }
 
 module.exports = {
-  home, product, success, message, legalPage,
+  home, product, success, message, lostLinks, legalPage,
   adminLogin, adminDashboard, adminProductForm, adminOrders, adminLegal, LEGAL_KEYS,
 };

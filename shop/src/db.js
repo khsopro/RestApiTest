@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS orders (
   download_token    TEXT NOT NULL UNIQUE,
   downloads         INTEGER NOT NULL DEFAULT 0,
   waiver_consent_at TEXT,
+  email_sent_at     TEXT,
   expires_at        TEXT NOT NULL,
   created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -42,7 +43,14 @@ function openDb(config) {
   const db = new DatabaseSync(config.dbFile);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
   db.exec(SCHEMA);
+  migrate(db);
   return createRepo(db);
+}
+
+/** Adds columns introduced after the first release to existing databases. */
+function migrate(db) {
+  const cols = db.prepare('PRAGMA table_info(orders)').all().map((c) => c.name);
+  if (!cols.includes('email_sent_at')) db.exec('ALTER TABLE orders ADD COLUMN email_sent_at TEXT');
 }
 
 function createRepo(db) {
@@ -102,6 +110,23 @@ function createRepo(db) {
     registerDownload(orderId, limit) {
       const r = q('UPDATE orders SET downloads = downloads + 1 WHERE id = ? AND downloads < ?').run(orderId, limit);
       return r.changes === 1;
+    },
+    getOrder(id) {
+      return q('SELECT * FROM orders WHERE id = ?').get(id);
+    },
+    /** Reserves the order for its confirmation email; false if another request already sent or is sending it. */
+    claimOrderEmail(orderId) {
+      return q("UPDATE orders SET email_sent_at = 'pending' WHERE id = ? AND email_sent_at IS NULL").run(orderId).changes === 1;
+    },
+    markOrderEmail(orderId, sent) {
+      q('UPDATE orders SET email_sent_at = ? WHERE id = ?').run(sent ? new Date().toISOString() : null, orderId);
+    },
+    /** Orders of one buyer whose download link still works, newest first. */
+    activeOrdersForEmail(email) {
+      return q(`SELECT o.*, p.title AS product_title FROM orders o
+                JOIN products p ON p.id = o.product_id
+                WHERE lower(o.email) = lower(?) AND o.expires_at > ?
+                ORDER BY o.created_at DESC`).all(email, new Date().toISOString());
     },
     listOrders(limit = 200) {
       return q(`SELECT o.*, p.title AS product_title FROM orders o

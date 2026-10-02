@@ -6,6 +6,7 @@ const multer = require('multer');
 const { loadConfig } = require('./config');
 const { openDb } = require('./db');
 const { createAuth } = require('./auth');
+const { createMailer } = require('./mailer');
 const { parsePrice, slugify, randomToken } = require('./util');
 const views = require('./views');
 
@@ -16,9 +17,12 @@ const FLASH = {
   created: 'Text angelegt.',
   deleted: 'Text gelöscht.',
   hidden: 'Der Text hat Bestellungen und wurde deshalb nur versteckt.',
+  mailed: 'E-Mail wurde verschickt.',
+  mailfail: 'E-Mail konnte nicht verschickt werden – prüfe die SMTP-Einstellungen und das Server-Log.',
 };
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function createApp({ config, repo, stripe }) {
+function createApp({ config, repo, stripe, mailer = createMailer(config) }) {
   const app = express();
   const auth = createAuth(config);
   const paymentsEnabled = !!stripe;
@@ -29,7 +33,7 @@ function createApp({ config, repo, stripe }) {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Referrer-Policy', 'same-origin');
-    res.locals.ctx = { config, repo, paymentsEnabled, flash: FLASH[req.query.msg] || '' };
+    res.locals.ctx = { config, repo, paymentsEnabled, mailEnabled: mailer.enabled, flash: FLASH[req.query.msg] || '' };
     next();
   });
 
@@ -63,7 +67,7 @@ function createApp({ config, repo, stripe }) {
     const productId = Number(session.metadata?.product_id);
     if (!repo.getProduct(productId)) throw new Error(`Unbekanntes Produkt ${session.metadata?.product_id}`);
     const expires = new Date(Date.now() + config.downloadDays * 24 * 3600 * 1000);
-    return repo.createOrderOnce({
+    const order = repo.createOrderOnce({
       stripe_session_id: session.id,
       product_id: productId,
       email: session.customer_details?.email || session.customer_email || '',
@@ -73,6 +77,35 @@ function createApp({ config, repo, stripe }) {
       waiver_consent_at: session.metadata?.waiver_consent_at || null,
       expires_at: expires.toISOString(),
     });
+    // Runs in the background so the buyer is not kept waiting; the claim makes sure it goes out once.
+    deliverOrderEmail(order);
+    return order;
+  }
+
+  /** Sends the download link to the buyer (once per order) and notifies the shop owner. */
+  async function deliverOrderEmail(order) {
+    if (!mailer.enabled || !order.email || !repo.claimOrderEmail(order.id)) return;
+    const p = repo.getProduct(order.product_id);
+    try {
+      await mailer.purchase(order, p);
+      repo.markOrderEmail(order.id, true);
+    } catch (err) {
+      repo.markOrderEmail(order.id, false);
+      console.error(`E-Mail zu Bestellung ${order.id} fehlgeschlagen`, err);
+      return;
+    }
+    mailer.ownerNotice(order, p).catch((err) => console.error('Verkaufs-Benachrichtigung fehlgeschlagen', err));
+  }
+
+  // Simple in-memory limit for the "lost link" form: 5 requests per IP and hour.
+  const linkRequests = new Map();
+  function allowLinkRequest(ip) {
+    const now = Date.now();
+    const recent = (linkRequests.get(ip) || []).filter((t) => now - t < 3600 * 1000);
+    if (recent.length >= 5) return false;
+    recent.push(now);
+    linkRequests.set(ip, recent);
+    return true;
   }
 
   /* ---------- Shop ---------- */
@@ -157,6 +190,28 @@ function createApp({ config, repo, stripe }) {
     }
     const filePath = path.join(config.filesDir, p.file_name);
     res.download(filePath, `${p.slug}${path.extname(p.file_name)}`);
+  });
+
+  app.get('/links', (req, res) => {
+    res.send(views.lostLinks(res.locals.ctx));
+  });
+
+  app.post('/links', async (req, res) => {
+    const ctx = res.locals.ctx;
+    const email = String(req.body.email || '').trim();
+    if (!EMAIL_RE.test(email)) return res.status(400).send(views.lostLinks(ctx, { error: 'Bitte gib eine gültige E-Mail-Adresse ein.', email }));
+    if (!allowLinkRequest(req.ip)) return res.status(429).send(views.lostLinks(ctx, { error: 'Zu viele Anfragen. Bitte versuch es später noch einmal.', email }));
+    const orders = repo.activeOrdersForEmail(email);
+    if (orders.length && mailer.enabled) {
+      try {
+        await mailer.resend(orders[0].email, orders);
+      } catch (err) {
+        console.error('Link-Versand fehlgeschlagen', err);
+      }
+    }
+    // Same answer whether or not orders exist, so nobody can probe which addresses bought something.
+    res.send(views.message(ctx, 'E-Mail ist unterwegs',
+      `Falls es zu ${email} gültige Käufe gibt, haben wir dir die Download-Links geschickt. Schau auch im Spam-Ordner nach.`));
   });
 
   const LEGAL_TITLES = { impressum: 'Impressum', datenschutz: 'Datenschutzerklärung', agb: 'AGB', widerruf: 'Widerrufsbelehrung' };
@@ -291,6 +346,20 @@ function createApp({ config, repo, stripe }) {
     res.send(views.adminOrders(res.locals.ctx, repo.listOrders()));
   });
 
+  app.post('/admin/orders/:id/email', async (req, res, next) => {
+    const order = repo.getOrder(Number(req.params.id));
+    if (!order) return next();
+    try {
+      if (!order.email) throw new Error('Bestellung hat keine E-Mail-Adresse');
+      await mailer.purchase(order, repo.getProduct(order.product_id));
+      repo.markOrderEmail(order.id, true);
+      res.redirect('/admin/orders?msg=mailed');
+    } catch (err) {
+      console.error(`E-Mail zu Bestellung ${order.id} fehlgeschlagen`, err);
+      res.redirect('/admin/orders?msg=mailfail');
+    }
+  });
+
   app.get('/admin/legal', (req, res) => {
     res.send(views.adminLegal(res.locals.ctx));
   });
@@ -320,6 +389,7 @@ if (require.main === module) {
   const stripe = config.stripeSecretKey ? require('stripe')(config.stripeSecretKey) : null;
   if (!config.adminPassword) console.warn('Warnung: ADMIN_PASSWORD ist nicht gesetzt – /admin ist gesperrt.');
   if (!config.sessionSecret) console.warn('Warnung: SESSION_SECRET ist nicht gesetzt – Admin-Anmeldungen gelten nur bis zum Neustart.');
+  if (!config.smtp || !config.mailFrom) console.warn('Warnung: SMTP_HOST/MAIL_FROM nicht gesetzt – Käufer bekommen keine E-Mail.');
   if (!stripe) console.warn('Warnung: STRIPE_SECRET_KEY ist nicht gesetzt – Käufe sind deaktiviert.');
   const { app } = createApp({ config, repo, stripe });
   app.listen(config.port, () => console.log(`${config.shopName} läuft auf ${config.baseUrl}`));

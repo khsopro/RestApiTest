@@ -7,7 +7,9 @@ digitale Downloads – Kurzgeschichten, Gedichte, E-Books als PDF, EPUB usw.
 
 - Schaufenster mit allen Texten, Detailseite mit Beschreibung, Titelbild und **öffentlicher Leseprobe**
 - Bezahlung über **Stripe Checkout** (Karte, PayPal, Klarna, SEPA … – je nach Stripe-Einstellungen)
-- Nach dem Kauf ein persönlicher **Download-Link** (standardmäßig 5 Downloads / 30 Tage)
+- Nach dem Kauf ein persönlicher **Download-Link** (standardmäßig 5 Downloads / 30 Tage) – auf der Danke-Seite **und per E-Mail**
+- „Download-Link verloren?“: Käufer können sich ihre gültigen Links erneut zuschicken lassen
+- Optional eine E-Mail an dich bei jedem Verkauf
 - Pflicht-Häkchen zum Verzicht auf das Widerrufsrecht bei digitalen Inhalten (§ 356 Abs. 5 BGB), wird mit der Bestellung gespeichert
 - **Verwaltung** unter `/admin`: Texte anlegen/bearbeiten, Dateien und Titelbilder hochladen, Bestellungen und Umsatz ansehen,
   Impressum/Datenschutz/AGB/Widerruf und Begrüßungstext pflegen
@@ -38,6 +40,25 @@ npm start                # http://localhost:3000, Verwaltung unter /admin
 Die Bestellung wird sowohl über den Webhook als auch beim Zurückkehren auf die Danke-Seite erfasst,
 doppelte Bestellungen entstehen dabei nicht.
 
+## E-Mail einrichten
+
+Die E-Mails werden über SMTP verschickt – das bietet praktisch jeder Mail-Anbieter. Für zuverlässige
+Zustellung (nicht im Spam) eignet sich ein Versanddienst wie **Brevo** (kostenlos bis 300 Mails/Tag),
+Postmark oder Mailjet; dort deine Absender-Domain bestätigen. Dann in `.env`:
+
+```
+SMTP_HOST=smtp-relay.brevo.com
+SMTP_PORT=587
+SMTP_USER=dein-login
+SMTP_PASS=dein-smtp-schluessel
+MAIL_FROM=shop@deine-domain.de
+OWNER_EMAIL=du@deine-domain.de   # optional: Benachrichtigung bei jedem Verkauf
+```
+
+Jede Bestellung bekommt genau eine E-Mail. Ob sie rausging, siehst du unter *Bestellungen*; dort kannst du
+sie auch erneut senden. Ohne SMTP-Einstellungen läuft der Shop weiter, der Link steht dann nur auf der
+Danke-Seite.
+
 ## Online stellen
 
 Der Shop braucht einen Server, auf dem Node.js läuft, und einen dauerhaften Speicherort für den Ordner
@@ -63,11 +84,10 @@ npm test
 ```
 
 Die Tests spielen einen kompletten Kauf mit einem Stripe-Ersatz durch (Text anlegen, kaufen, herunterladen,
-Download-Limit).
+Download-Limit, E-Mail-Versand).
 
 ## Mögliche Erweiterungen
 
-- Download-Link zusätzlich per E-Mail verschicken (z.B. über Postmark/Brevo)
 - Rabattcodes (Stripe Promotion Codes: `allow_promotion_codes: true` in `src/server.js`)
 - Bundles / mehrere Texte in einem Kauf
 - Wasserzeichen mit Käufer-E-Mail im PDF
