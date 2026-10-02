@@ -4,7 +4,8 @@ function layout(ctx, { title, body, admin = false }) {
   const nav = admin
     ? `<a href="/admin">Texte</a><a href="/admin/orders">Bestellungen</a><a href="/admin/legal">Rechtliches</a>
        <form method="post" action="/admin/logout" class="inline"><button class="link">Abmelden</button></form>`
-    : `<a href="/">Alle Texte</a>`;
+    : `<a href="/">Alle Texte</a>
+       <a href="/cart" class="cart-link">Warenkorb${ctx.cartCount ? ` <span class="badge">${ctx.cartCount}</span>` : ''}</a>`;
   return `<!doctype html>
 <html lang="de">
 <head>
@@ -77,17 +78,11 @@ function product(ctx, p, { error } = {}) {
         <p class="price big">${formatMoney(p.price_cents, ctx.config.currency)}</p>
         <p class="muted small">inkl. MwSt. · Digitaler Download${p.file_label ? ` (${esc(p.file_label)})` : ''}</p>
         ${error ? `<div class="error">${esc(error)}</div>` : ''}
-        ${canBuy ? `
-        <form method="post" action="/buy/${esc(p.slug)}" class="buy">
-          <label class="consent">
-            <input type="checkbox" name="waiver" value="1" required>
-            <span>Ich stimme ausdrücklich zu, dass mit der Bereitstellung des Downloads vor Ablauf der
-            Widerrufsfrist begonnen wird. Mir ist bekannt, dass ich dadurch mein
-            <a href="/widerruf" target="_blank">Widerrufsrecht</a> verliere.</span>
-          </label>
-          <button class="btn">Jetzt kaufen</button>
-        </form>`
-        : '<p class="muted">Dieser Text ist gerade nicht erhältlich.</p>'}
+        ${!canBuy ? '<p class="muted">Dieser Text ist gerade nicht erhältlich.</p>'
+          : ctx.inCart(p.id) ? '<p class="buy"><a class="btn secondary" href="/cart">Im Warenkorb ✓ – zur Kasse</a></p>'
+          : `<form method="post" action="/cart/add/${esc(p.slug)}" class="buy">
+               <button class="btn">In den Warenkorb</button>
+             </form>`}
         <div class="description">${paragraphs(p.description)}</div>
       </div>
     </article>
@@ -99,22 +94,92 @@ function product(ctx, p, { error } = {}) {
   });
 }
 
-function success(ctx, order, p) {
+function waiverCheckbox() {
+  return `<label class="consent">
+    <input type="checkbox" name="waiver" value="1" required>
+    <span>Ich stimme ausdrücklich zu, dass mit der Bereitstellung der Downloads vor Ablauf der
+    Widerrufsfrist begonnen wird. Mir ist bekannt, dass ich dadurch mein
+    <a href="/widerruf" target="_blank">Widerrufsrecht</a> verliere.</span>
+  </label>`;
+}
+
+function cart(ctx, items, { error } = {}) {
+  const total = items.reduce((sum, p) => sum + p.price_cents, 0);
+  const rows = items.map((p) => `
+    <li class="cart-item">
+      <a href="/t/${esc(p.slug)}">${cover(p, 'cover mini')}</a>
+      <div class="cart-item-info">
+        <a href="/t/${esc(p.slug)}"><strong>${esc(p.title)}</strong></a>
+        ${p.subtitle ? `<div class="muted small">${esc(p.subtitle)}</div>` : ''}
+        <form method="post" action="/cart/remove/${p.id}"><button class="link accent">Entfernen</button></form>
+      </div>
+      <div class="price">${formatMoney(p.price_cents, ctx.config.currency)}</div>
+    </li>`).join('');
+  return layout(ctx, {
+    title: 'Warenkorb',
+    body: `
+    <section class="panel wide">
+      <h1>Warenkorb</h1>
+      ${error ? `<div class="error">${esc(error)}</div>` : ''}
+      ${items.length ? `
+      <ul class="cart-list">${rows}</ul>
+      <div class="cart-total"><span>Summe</span><span class="price big">${formatMoney(total, ctx.config.currency)}</span></div>
+      <p class="muted small right">inkl. MwSt. · Digitale Downloads</p>
+      <form method="post" action="/checkout" class="buy">
+        ${waiverCheckbox()}
+        <button class="btn">Zur Kasse</button>
+      </form>
+      <p><a href="/">Weiter stöbern</a></p>`
+      : '<p class="empty">Dein Warenkorb ist leer.</p><p class="center"><a class="btn" href="/">Zu den Texten</a></p>'}
+    </section>`,
+  });
+}
+
+function downloadList(ctx, order, items) {
+  return `<ul class="cart-list">${items.map((i) => {
+    const left = Math.max(0, ctx.config.downloadLimit - i.downloads);
+    return `
+    <li class="cart-item">
+      ${cover({ title: i.title, cover_name: i.cover_name }, 'cover mini')}
+      <div class="cart-item-info">
+        <strong>${esc(i.title)}</strong>
+        <div class="muted small">${i.file_label ? `${esc(i.file_label)} · ` : ''}noch ${left} Download${left === 1 ? '' : 's'}</div>
+      </div>
+      ${i.file_name && left > 0
+        ? `<a class="btn small" href="/download/${esc(order.download_token)}/${i.product_id}">Herunterladen</a>`
+        : '<span class="muted small">nicht verfügbar</span>'}
+    </li>`;
+  }).join('')}</ul>`;
+}
+
+function success(ctx, order, items) {
   const url = `${ctx.config.baseUrl}/download/${order.download_token}`;
   return layout(ctx, {
     title: 'Danke für deinen Kauf',
     body: `
-    <section class="panel center">
-      <h1>Danke für deinen Kauf!</h1>
-      <p>„${esc(p ? p.title : 'Dein Text')}“ steht jetzt für dich bereit.</p>
-      <p><a class="btn" href="/download/${esc(order.download_token)}">Jetzt herunterladen</a></p>
+    <section class="panel wide">
+      <h1 class="center">Danke für deinen Kauf!</h1>
+      <p class="center">${items.length === 1 ? 'Dein Text steht' : 'Deine Texte stehen'} jetzt für dich bereit.</p>
+      ${downloadList(ctx, order, items)}
       <p class="muted small">Speichere dir diesen Link – er funktioniert bis zum
         ${esc(new Date(order.expires_at).toLocaleDateString('de-DE'))}
-        und für insgesamt ${ctx.config.downloadLimit} Downloads:</p>
+        und für je ${ctx.config.downloadLimit} Downloads pro Text:</p>
       <p><input class="copy" readonly value="${esc(url)}" onclick="this.select()"></p>
       ${order.email ? `<p class="muted small">${ctx.mailEnabled
         ? `Wir haben dir den Link außerdem per E-Mail an <strong>${esc(order.email)}</strong> geschickt.`
         : `Die Zahlungsbestätigung geht an ${esc(order.email)}.`}</p>` : ''}
+    </section>`,
+  });
+}
+
+function downloads(ctx, order, items) {
+  return layout(ctx, {
+    title: 'Deine Downloads',
+    body: `
+    <section class="panel wide">
+      <h1>Deine Downloads</h1>
+      <p class="muted small">Gültig bis ${esc(new Date(order.expires_at).toLocaleDateString('de-DE'))}.</p>
+      ${downloadList(ctx, order, items)}
     </section>`,
   });
 }
@@ -247,10 +312,10 @@ function adminOrders(ctx, orders) {
   const rows = orders.map((o) => `
     <tr>
       <td>${esc(new Date(o.created_at + 'Z').toLocaleString('de-DE'))}</td>
-      <td>${esc(o.product_title || `#${o.product_id}`)}</td>
+      <td>${esc(o.titles || `#${o.product_id}`)}</td>
       <td>${esc(o.email)}</td>
       <td>${formatMoney(o.amount_cents, o.currency)}</td>
-      <td>${o.downloads} / ${ctx.config.downloadLimit}</td>
+      <td>${o.downloads}</td>
       <td>${o.email_sent_at && o.email_sent_at !== 'pending' ? '<span class="good">gesendet</span>'
         : o.email_sent_at === 'pending' ? '<span class="muted">wird gesendet</span>' : '<span class="bad">nicht gesendet</span>'}
         ${ctx.mailEnabled && o.email ? `<form method="post" action="/admin/orders/${o.id}/email" class="inline">
@@ -264,7 +329,7 @@ function adminOrders(ctx, orders) {
     <div class="toolbar"><h1>Bestellungen</h1></div>
     ${orders.length ? `
     <table>
-      <thead><tr><th>Datum</th><th>Text</th><th>E-Mail</th><th>Betrag</th><th>Downloads</th><th>E-Mail-Versand</th><th></th></tr></thead>
+      <thead><tr><th>Datum</th><th>Texte</th><th>E-Mail</th><th>Betrag</th><th>Downloads</th><th>E-Mail-Versand</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table>` : '<p class="empty">Noch keine Bestellungen.</p>'}`,
   });
@@ -296,6 +361,6 @@ function adminLegal(ctx) {
 }
 
 module.exports = {
-  home, product, success, message, lostLinks, legalPage,
+  home, product, cart, success, downloads, message, lostLinks, legalPage,
   adminLogin, adminDashboard, adminProductForm, adminOrders, adminLegal, LEGAL_KEYS,
 };

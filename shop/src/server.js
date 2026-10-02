@@ -18,9 +18,13 @@ const FLASH = {
   deleted: 'Text gelöscht.',
   hidden: 'Der Text hat Bestellungen und wurde deshalb nur versteckt.',
   mailed: 'E-Mail wurde verschickt.',
+  added: 'Im Warenkorb.',
   mailfail: 'E-Mail konnte nicht verschickt werden – prüfe die SMTP-Einstellungen und das Server-Log.',
 };
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Keeps the Stripe metadata (max. 500 characters per value) within limits.
+const MAX_CART_ITEMS = 30;
+const CART_COOKIE = 'cart';
 
 function createApp({ config, repo, stripe, mailer = createMailer(config) }) {
   const app = express();
@@ -33,7 +37,12 @@ function createApp({ config, repo, stripe, mailer = createMailer(config) }) {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Referrer-Policy', 'same-origin');
-    res.locals.ctx = { config, repo, paymentsEnabled, mailEnabled: mailer.enabled, flash: FLASH[req.query.msg] || '' };
+    const cart = readCart(req);
+    res.locals.cart = cart;
+    res.locals.ctx = {
+      config, repo, paymentsEnabled, mailEnabled: mailer.enabled, flash: FLASH[req.query.msg] || '',
+      cartCount: cart.length, inCart: (id) => cart.some((p) => p.id === id),
+    };
     next();
   });
 
@@ -61,22 +70,51 @@ function createApp({ config, repo, stripe, mailer = createMailer(config) }) {
   app.use('/static', express.static(path.join(__dirname, '..', 'public'), { maxAge: '1h' }));
   app.use('/covers', express.static(config.coversDir, { maxAge: '1d' }));
 
+  /* ---------- Cart (a cookie with product ids) ---------- */
+
+  function readCart(req) {
+    const header = req.headers.cookie || '';
+    const raw = header.split(';').map((c) => c.trim()).find((c) => c.startsWith(`${CART_COOKIE}=`));
+    if (!raw) return [];
+    const ids = [...new Set(raw.slice(CART_COOKIE.length + 1).split('-').map(Number).filter(Number.isInteger))];
+    return ids.map((id) => repo.getProduct(id)).filter((p) => p && p.active && p.file_name).slice(0, MAX_CART_ITEMS);
+  }
+
+  function writeCart(res, products) {
+    const value = products.map((p) => p.id).join('-');
+    const secure = config.baseUrl.startsWith('https://') ? '; Secure' : '';
+    res.append('Set-Cookie', value
+      ? `${CART_COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 24 * 3600}${secure}`
+      : `${CART_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+  }
+
+  /** Reads "id:price,id:price" from the session metadata (or the single product_id of older sessions). */
+  function itemsFromSession(session) {
+    const meta = session.metadata || {};
+    const pairs = meta.items
+      ? meta.items.split(',').map((pair) => pair.split(':').map(Number))
+      : [[Number(meta.product_id), null]];
+    return pairs.map(([id, price]) => {
+      const p = repo.getProduct(id);
+      if (!p) throw new Error(`Unbekanntes Produkt ${id}`);
+      return { product_id: p.id, title: p.title, price_cents: Number.isInteger(price) ? price : p.price_cents };
+    });
+  }
+
   /** Records a paid Checkout Session as an order (idempotent). */
   function fulfill(session) {
     if (session.payment_status !== 'paid') return null;
-    const productId = Number(session.metadata?.product_id);
-    if (!repo.getProduct(productId)) throw new Error(`Unbekanntes Produkt ${session.metadata?.product_id}`);
+    const items = itemsFromSession(session);
     const expires = new Date(Date.now() + config.downloadDays * 24 * 3600 * 1000);
     const order = repo.createOrderOnce({
       stripe_session_id: session.id,
-      product_id: productId,
       email: session.customer_details?.email || session.customer_email || '',
       amount_cents: session.amount_total ?? 0,
       currency: session.currency || config.currency,
       download_token: randomToken(),
       waiver_consent_at: session.metadata?.waiver_consent_at || null,
       expires_at: expires.toISOString(),
-    });
+    }, items);
     // Runs in the background so the buyer is not kept waiting; the claim makes sure it goes out once.
     deliverOrderEmail(order);
     return order;
@@ -85,16 +123,16 @@ function createApp({ config, repo, stripe, mailer = createMailer(config) }) {
   /** Sends the download link to the buyer (once per order) and notifies the shop owner. */
   async function deliverOrderEmail(order) {
     if (!mailer.enabled || !order.email || !repo.claimOrderEmail(order.id)) return;
-    const p = repo.getProduct(order.product_id);
+    const items = repo.getOrderItems(order.id);
     try {
-      await mailer.purchase(order, p);
+      await mailer.purchase(order, items);
       repo.markOrderEmail(order.id, true);
     } catch (err) {
       repo.markOrderEmail(order.id, false);
       console.error(`E-Mail zu Bestellung ${order.id} fehlgeschlagen`, err);
       return;
     }
-    mailer.ownerNotice(order, p).catch((err) => console.error('Verkaufs-Benachrichtigung fehlgeschlagen', err));
+    mailer.ownerNotice(order, items).catch((err) => console.error('Verkaufs-Benachrichtigung fehlgeschlagen', err));
   }
 
   // Simple in-memory limit for the "lost link" form: 5 requests per IP and hour.
@@ -120,35 +158,59 @@ function createApp({ config, repo, stripe, mailer = createMailer(config) }) {
     res.send(views.product(res.locals.ctx, p));
   });
 
-  app.post('/buy/:slug', async (req, res, next) => {
+  app.get('/cart', (req, res) => {
+    res.send(views.cart(res.locals.ctx, res.locals.cart));
+  });
+
+  app.post('/cart/add/:slug', (req, res, next) => {
     const p = repo.getProductBySlug(req.params.slug);
-    if (!p || !p.active) return next();
-    const ctx = res.locals.ctx;
-    if (!stripe || !p.file_name) {
-      return res.status(503).send(views.product(ctx, p, { error: 'Kauf ist gerade nicht möglich.' }));
+    if (!p || !p.active || !p.file_name) return next();
+    const cart = res.locals.cart;
+    if (!cart.some((c) => c.id === p.id)) {
+      if (cart.length >= MAX_CART_ITEMS) {
+        return res.status(400).send(views.cart(res.locals.ctx, cart, { error: `Es passen höchstens ${MAX_CART_ITEMS} Texte in eine Bestellung.` }));
+      }
+      cart.push(p);
+      writeCart(res, cart);
     }
+    res.redirect(303, req.body.next === 'shop' ? `/t/${encodeURIComponent(p.slug)}?msg=added` : '/cart');
+  });
+
+  app.post('/cart/remove/:id', (req, res) => {
+    writeCart(res, res.locals.cart.filter((p) => p.id !== Number(req.params.id)));
+    res.redirect(303, '/cart');
+  });
+
+  app.post('/checkout', async (req, res) => {
+    const ctx = res.locals.ctx;
+    const cart = res.locals.cart;
+    if (!cart.length) return res.redirect(303, '/cart');
+    if (!stripe) return res.status(503).send(views.cart(ctx, cart, { error: 'Kauf ist gerade nicht möglich.' }));
     if (req.body.waiver !== '1') {
-      return res.status(400).send(views.product(ctx, p, { error: 'Bitte bestätige den Hinweis zum Widerrufsrecht.' }));
+      return res.status(400).send(views.cart(ctx, cart, { error: 'Bitte bestätige den Hinweis zum Widerrufsrecht.' }));
     }
     try {
       const session = await stripe.checkout.sessions.create({
         mode: 'payment',
-        line_items: [{
+        line_items: cart.map((p) => ({
           quantity: 1,
           price_data: {
             currency: config.currency,
             unit_amount: p.price_cents,
             product_data: { name: p.title, ...(p.subtitle ? { description: p.subtitle } : {}) },
           },
-        }],
-        metadata: { product_id: String(p.id), waiver_consent_at: new Date().toISOString() },
+        })),
+        metadata: {
+          items: cart.map((p) => `${p.id}:${p.price_cents}`).join(','),
+          waiver_consent_at: new Date().toISOString(),
+        },
         success_url: `${config.baseUrl}/success?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${config.baseUrl}/t/${encodeURIComponent(p.slug)}`,
+        cancel_url: `${config.baseUrl}/cart`,
       });
       res.redirect(303, session.url);
     } catch (err) {
       console.error('Stripe-Fehler', err);
-      res.status(502).send(views.product(ctx, p, { error: 'Die Zahlung konnte nicht gestartet werden. Bitte versuch es später noch einmal.' }));
+      res.status(502).send(views.cart(ctx, cart, { error: 'Die Zahlung konnte nicht gestartet werden. Bitte versuch es später noch einmal.' }));
     }
   });
 
@@ -170,26 +232,43 @@ function createApp({ config, repo, stripe, mailer = createMailer(config) }) {
       return res.send(views.message(ctx, 'Zahlung wird verarbeitet',
         'Deine Zahlung ist noch nicht bestätigt. Lade diese Seite in ein paar Minuten neu.'));
     }
-    res.send(views.success(ctx, order, repo.getProduct(order.product_id)));
+    // The purchase is done, so the cart can go.
+    writeCart(res, []);
+    res.send(views.success({ ...ctx, cartCount: 0 }, order, repo.getOrderItems(order.id)));
   });
 
-  app.get('/download/:token', (req, res, next) => {
+  function findValidOrder(req, res) {
     const ctx = res.locals.ctx;
     const order = repo.getOrderByToken(req.params.token);
-    if (!order) return next();
-    const p = repo.getProduct(order.product_id);
-    if (!p || !p.file_name) {
+    if (!order) return null;
+    if (!auth.isAdmin(req) && new Date(order.expires_at) < new Date()) {
+      res.status(410).send(views.message(ctx, 'Link abgelaufen', 'Dieser Download-Link ist abgelaufen. Bitte melde dich bei uns, wir helfen gern.'));
+      return false;
+    }
+    return order;
+  }
+
+  app.get('/download/:token', (req, res, next) => {
+    const order = findValidOrder(req, res);
+    if (order === null) return next();
+    if (!order) return;
+    res.send(views.downloads(res.locals.ctx, order, repo.getOrderItems(order.id)));
+  });
+
+  app.get('/download/:token/:productId', (req, res, next) => {
+    const ctx = res.locals.ctx;
+    const order = findValidOrder(req, res);
+    if (order === null) return next();
+    if (!order) return;
+    const item = repo.getOrderItems(order.id).find((i) => i.product_id === Number(req.params.productId));
+    if (!item) return next();
+    if (!item.file_name) {
       return res.status(410).send(views.message(ctx, 'Nicht verfügbar', 'Diese Datei ist nicht mehr verfügbar. Bitte melde dich bei uns.'));
     }
-    const admin = auth.isAdmin(req);
-    if (!admin && new Date(order.expires_at) < new Date()) {
-      return res.status(410).send(views.message(ctx, 'Link abgelaufen', 'Dieser Download-Link ist abgelaufen. Bitte melde dich bei uns, wir helfen gern.'));
+    if (!auth.isAdmin(req) && !repo.registerDownload(order.id, item.product_id, config.downloadLimit)) {
+      return res.status(410).send(views.message(ctx, 'Download-Limit erreicht', 'Dieser Text wurde über diesen Link bereits zu oft heruntergeladen. Bitte melde dich bei uns, wir helfen gern.'));
     }
-    if (!admin && !repo.registerDownload(order.id, config.downloadLimit)) {
-      return res.status(410).send(views.message(ctx, 'Download-Limit erreicht', 'Dieser Link wurde bereits zu oft verwendet. Bitte melde dich bei uns, wir helfen gern.'));
-    }
-    const filePath = path.join(config.filesDir, p.file_name);
-    res.download(filePath, `${p.slug}${path.extname(p.file_name)}`);
+    res.download(path.join(config.filesDir, item.file_name), `${item.slug}${path.extname(item.file_name)}`);
   });
 
   app.get('/links', (req, res) => {
@@ -351,7 +430,7 @@ function createApp({ config, repo, stripe, mailer = createMailer(config) }) {
     if (!order) return next();
     try {
       if (!order.email) throw new Error('Bestellung hat keine E-Mail-Adresse');
-      await mailer.purchase(order, repo.getProduct(order.product_id));
+      await mailer.purchase(order, repo.getOrderItems(order.id));
       repo.markOrderEmail(order.id, true);
       res.redirect('/admin/orders?msg=mailed');
     } catch (err) {

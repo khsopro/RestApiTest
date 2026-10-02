@@ -6,8 +6,9 @@ digitale Downloads – Kurzgeschichten, Gedichte, E-Books als PDF, EPUB usw.
 **Funktionen**
 
 - Schaufenster mit allen Texten, Detailseite mit Beschreibung, Titelbild und **öffentlicher Leseprobe**
+- **Warenkorb**: mehrere Texte in einer Bestellung, eine Zahlung, ein Download-Link für alles
 - Bezahlung über **Stripe Checkout** (Karte, PayPal, Klarna, SEPA … – je nach Stripe-Einstellungen)
-- Nach dem Kauf ein persönlicher **Download-Link** (standardmäßig 5 Downloads / 30 Tage) – auf der Danke-Seite **und per E-Mail**
+- Nach dem Kauf ein persönlicher **Download-Link** (standardmäßig 30 Tage und 5 Downloads je Text) – auf der Danke-Seite **und per E-Mail**
 - „Download-Link verloren?“: Käufer können sich ihre gültigen Links erneut zuschicken lassen
 - Optional eine E-Mail an dich bei jedem Verkauf
 - Pflicht-Häkchen zum Verzicht auf das Widerrufsrecht bei digitalen Inhalten (§ 356 Abs. 5 BGB), wird mit der Bestellung gespeichert
@@ -83,11 +84,11 @@ den Hinweis „inkl. MwSt.“ in `src/views.js` anpassen.
 npm test
 ```
 
-Die Tests spielen einen kompletten Kauf mit einem Stripe-Ersatz durch (Text anlegen, kaufen, herunterladen,
-Download-Limit, E-Mail-Versand).
+Die Tests spielen einen kompletten Kauf mit einem Stripe-Ersatz durch (Texte anlegen, Warenkorb, kaufen,
+herunterladen, Download-Limit, E-Mail-Versand, Übernahme alter Bestellungen).
 
 ## Mögliche Erweiterungen
 
 - Rabattcodes (Stripe Promotion Codes: `allow_promotion_codes: true` in `src/server.js`)
-- Bundles / mehrere Texte in einem Kauf
+- Bundles (z.B. „alle Gedichte zusammen“ zum Sonderpreis)
 - Wasserzeichen mit Käufer-E-Mail im PDF

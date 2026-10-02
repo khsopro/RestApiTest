@@ -30,6 +30,15 @@ CREATE TABLE IF NOT EXISTS orders (
   expires_at        TEXT NOT NULL,
   created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS order_items (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id    INTEGER NOT NULL REFERENCES orders(id),
+  product_id  INTEGER NOT NULL REFERENCES products(id),
+  title       TEXT NOT NULL,
+  price_cents INTEGER NOT NULL,
+  downloads   INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (order_id, product_id)
+);
 CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -51,6 +60,11 @@ function openDb(config) {
 function migrate(db) {
   const cols = db.prepare('PRAGMA table_info(orders)').all().map((c) => c.name);
   if (!cols.includes('email_sent_at')) db.exec('ALTER TABLE orders ADD COLUMN email_sent_at TEXT');
+  // Orders from before the cart held exactly one text in orders.product_id; give them a matching item.
+  db.exec(`INSERT INTO order_items (order_id, product_id, title, price_cents, downloads)
+           SELECT o.id, o.product_id, COALESCE(p.title, 'Text'), o.amount_cents, o.downloads
+           FROM orders o LEFT JOIN products p ON p.id = o.product_id
+           WHERE NOT EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id)`);
 }
 
 function createRepo(db) {
@@ -89,7 +103,7 @@ function createRepo(db) {
       q('DELETE FROM products WHERE id = ?').run(id);
     },
     countOrdersForProduct(id) {
-      return q('SELECT COUNT(*) AS n FROM orders WHERE product_id = ?').get(id).n;
+      return q('SELECT COUNT(*) AS n FROM order_items WHERE product_id = ?').get(id).n;
     },
 
     getOrderBySession(sessionId) {
@@ -98,17 +112,39 @@ function createRepo(db) {
     getOrderByToken(token) {
       return q('SELECT * FROM orders WHERE download_token = ?').get(token);
     },
-    /** Inserts the order unless one already exists for this Stripe session; returns the stored order. */
-    createOrderOnce(o) {
-      q(`INSERT INTO orders (stripe_session_id, product_id, email, amount_cents, currency, download_token, waiver_consent_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(stripe_session_id) DO NOTHING`)
-        .run(o.stripe_session_id, o.product_id, o.email, o.amount_cents, o.currency,
-          o.download_token, o.waiver_consent_at ?? null, o.expires_at);
+    /**
+     * Inserts the order with its items unless one already exists for this Stripe session; returns the stored order.
+     * orders.product_id keeps the first item for compatibility with older databases.
+     */
+    createOrderOnce(o, items) {
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const r = q(`INSERT INTO orders (stripe_session_id, product_id, email, amount_cents, currency, download_token, waiver_consent_at, expires_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(stripe_session_id) DO NOTHING`)
+          .run(o.stripe_session_id, items[0].product_id, o.email, o.amount_cents, o.currency,
+            o.download_token, o.waiver_consent_at ?? null, o.expires_at);
+        if (r.changes === 1) {
+          const orderId = Number(r.lastInsertRowid);
+          const insert = q('INSERT INTO order_items (order_id, product_id, title, price_cents) VALUES (?, ?, ?, ?)');
+          for (const it of items) insert.run(orderId, it.product_id, it.title, it.price_cents);
+        }
+        db.exec('COMMIT');
+      } catch (err) {
+        db.exec('ROLLBACK');
+        throw err;
+      }
       return this.getOrderBySession(o.stripe_session_id);
     },
-    /** Atomically counts a download; returns false when the limit is already reached. */
-    registerDownload(orderId, limit) {
-      const r = q('UPDATE orders SET downloads = downloads + 1 WHERE id = ? AND downloads < ?').run(orderId, limit);
+    getOrderItems(orderId) {
+      return q(`SELECT i.*, p.slug, p.file_name, p.file_label, p.cover_name FROM order_items i
+                LEFT JOIN products p ON p.id = i.product_id
+                WHERE i.order_id = ? ORDER BY i.id`).all(orderId);
+    },
+    /** Atomically counts a download of one text in an order; returns false when its limit is already reached. */
+    registerDownload(orderId, productId, limit) {
+      const r = q('UPDATE order_items SET downloads = downloads + 1 WHERE order_id = ? AND product_id = ? AND downloads < ?')
+        .run(orderId, productId, limit);
+      if (r.changes === 1) q('UPDATE orders SET downloads = downloads + 1 WHERE id = ?').run(orderId);
       return r.changes === 1;
     },
     getOrder(id) {
@@ -123,14 +159,14 @@ function createRepo(db) {
     },
     /** Orders of one buyer whose download link still works, newest first. */
     activeOrdersForEmail(email) {
-      return q(`SELECT o.*, p.title AS product_title FROM orders o
-                JOIN products p ON p.id = o.product_id
+      return q(`SELECT o.*, (SELECT group_concat(i.title, ', ') FROM order_items i WHERE i.order_id = o.id) AS titles
+                FROM orders o
                 WHERE lower(o.email) = lower(?) AND o.expires_at > ?
                 ORDER BY o.created_at DESC`).all(email, new Date().toISOString());
     },
     listOrders(limit = 200) {
-      return q(`SELECT o.*, p.title AS product_title FROM orders o
-                LEFT JOIN products p ON p.id = o.product_id
+      return q(`SELECT o.*, (SELECT group_concat(i.title, ', ') FROM order_items i WHERE i.order_id = o.id) AS titles
+                FROM orders o
                 ORDER BY o.created_at DESC, o.id DESC LIMIT ?`).all(limit);
     },
     revenue() {

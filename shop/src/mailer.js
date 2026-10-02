@@ -16,25 +16,27 @@ function createMailer(config, transport = null) {
     await transport.sendMail({ from, ...message });
   }
 
-  function linkBlock(order, title) {
+  function linkBlock(order, titles) {
     const url = `${config.baseUrl}/download/${order.download_token}`;
     const until = new Date(order.expires_at).toLocaleDateString('de-DE');
-    return { url, text: `„${title}“\n${url}\n(gültig bis ${until}, ${config.downloadLimit} Downloads)` };
+    return `${titles.map((t) => `– „${t}“`).join('\n')}\n${url}\n(gültig bis ${until}, je Text ${config.downloadLimit} Downloads)`;
   }
+
+  const subjectFor = (items) => (items.length === 1 ? items[0].title : `${items.length} Texte`);
 
   return {
     enabled,
 
-    purchase(order, product) {
-      const { text } = linkBlock(order, product.title);
+    purchase(order, items) {
+      const text = linkBlock(order, items.map((i) => i.title));
       return send({
         to: order.email,
-        subject: `Dein Download: ${product.title}`,
+        subject: `Dein Download: ${subjectFor(items)}`,
         text: [
           'Hallo,',
           '',
           `vielen Dank für deinen Kauf (${formatMoney(order.amount_cents, order.currency)})!`,
-          'Hier ist dein persönlicher Download-Link:',
+          items.length === 1 ? 'Hier ist dein persönlicher Download-Link:' : 'Unter diesem persönlichen Link findest du alle gekauften Texte:',
           '',
           text,
           '',
@@ -57,19 +59,19 @@ function createMailer(config, transport = null) {
           '',
           'hier sind deine aktuell gültigen Download-Links:',
           '',
-          ...orders.map((o) => `${linkBlock(o, o.product_title).text}\n`),
+          ...orders.map((o) => `${linkBlock(o, (o.titles || 'Text').split(', '))}\n`),
           'Viel Freude beim Lesen!',
           config.shopName,
         ].join('\n'),
       });
     },
 
-    ownerNotice(order, product) {
+    ownerNotice(order, items) {
       if (!config.ownerEmail) return Promise.resolve();
       return send({
         to: config.ownerEmail,
-        subject: `Neuer Verkauf: ${product.title} (${formatMoney(order.amount_cents, order.currency)})`,
-        text: `${order.email || 'Unbekannt'} hat „${product.title}“ gekauft.\n\n${config.baseUrl}/admin/orders`,
+        subject: `Neuer Verkauf: ${subjectFor(items)} (${formatMoney(order.amount_cents, order.currency)})`,
+        text: `${order.email || 'Unbekannt'} hat gekauft:\n${items.map((i) => `– „${i.title}“`).join('\n')}\n\n${config.baseUrl}/admin/orders`,
       });
     },
   };
