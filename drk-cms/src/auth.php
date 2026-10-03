@@ -29,8 +29,17 @@ function user_roles(?array $u = null): array
     return $u ? array_filter(array_map('trim', explode(',', $u['rollen']))) : [];
 }
 
+/** $role darf mehrere Rollen mit | enthalten („blutspende|helfer“ = eine davon genügt) */
 function has_role(string $role): bool
 {
+    if (str_contains($role, '|')) {
+        foreach (explode('|', $role) as $one) {
+            if (has_role($one)) {
+                return true;
+            }
+        }
+        return false;
+    }
     $r = user_roles();
     return in_array('admin', $r, true) || in_array($role, $r, true);
 }

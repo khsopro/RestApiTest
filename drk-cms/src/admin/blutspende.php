@@ -349,7 +349,7 @@ if ($a === 'termin') {
                 $ok = count(array_filter($list, fn($e) => $e['status'] === 'zugesagt')); ?>
                 <section class="panel shift" id="s<?= (int)$s['id'] ?>">
                     <div class="shift-head">
-                        <h3><?= e($s['aufgabe']) ?> <small class="muted"><?= e($s['von']) ?>–<?= e($s['bis']) ?></small></h3>
+                        <h3><?= e($s['aufgabe']) ?><?= job_link($s['aufgabe']) ?> <small class="muted"><?= e($s['von']) ?>–<?= e($s['bis']) ?></small></h3>
                         <?= staffing_badge($ok, (int)$s['benoetigt']) ?>
                     </div>
                     <?php if ($s['qualifikation']): ?><p class="small muted">Benötigt: <?= e($s['qualifikation']) ?></p><?php endif; ?>
@@ -414,12 +414,13 @@ if ($a === 'termin') {
                 </section>
             <?php endforeach; ?>
         </div>
+        <datalist id="stellen"><?php foreach (all('SELECT titel FROM bs_stellen ORDER BY sortierung, titel') as $st): ?><option value="<?= e($st['titel']) ?>"><?php endforeach; ?></datalist>
         <form method="post" action="<?= e(url_admin('blutspende', 'schicht_add', ['id' => $id])) ?>" class="panel">
             <?= csrf_field() ?>
             <h3>Weitere Schicht / Aufgabe</h3>
             <div class="form-grid">
                 <?= form_fields([
-                    ['aufgabe', 'Aufgabe', 'text', ['required' => true]], ['benoetigt', 'Anzahl Personen', 'number', ['default' => 1]],
+                    ['aufgabe', 'Aufgabe', 'text', ['required' => true, 'list' => 'stellen', 'help' => 'Vorschläge aus den Stellenbeschreibungen']], ['benoetigt', 'Anzahl Personen', 'number', ['default' => 1]],
                     ['von', 'von', 'time', ['default' => $t['beginn']]], ['bis', 'bis', 'time', ['default' => $t['ende']]],
                     ['qualifikation', 'Benötigte Qualifikation', 'select', ['options' => array_merge([''], qualification_options())]],
                 ], []) ?>

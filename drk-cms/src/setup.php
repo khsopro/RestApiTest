@@ -99,6 +99,8 @@ function seed_defaults(string $vereinsname): void
     ], ['im_menue' => 0]);
 
     // Beispielrezepte für den Blutspende-Imbiss
+    seed_job_descriptions();
+
     $recipe = function (string $name, string $kat, int $portionen, string $zub, array $zutaten, int $veg = 0, string $allergene = ''): void {
         $id = insert('rezepte', ['name' => $name, 'kategorie' => $kat, 'portionen' => $portionen, 'zubereitung' => $zub,
             'allergene' => $allergene, 'vegetarisch' => $veg, 'erstellt' => now(), 'aktualisiert' => now()]);

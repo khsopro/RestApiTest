@@ -27,7 +27,7 @@ $user = current_user();
             <span><?= e(setting('seitentitel')) ?></span>
         </a>
         <nav>
-            <?php foreach ($modules as $key => $mod): [$role, $label, $icon] = $mod; $isSub = $mod[3] ?? false;
+            <?php foreach ($modules as $key => $mod): [$role, $label, $icon] = $mod; $isSub = ($mod[3] ?? false) && has_role('blutspende');
                 if ($role !== '' && !has_role($role)) continue; ?>
                 <a href="<?= e(url_admin($key)) ?>" class="<?= $key === $m ? 'active' : '' ?><?= $isSub ? ' sub' : '' ?>"><span class="ico"><?= $icon ?></span><?= e($label) ?></a>
             <?php endforeach; ?>

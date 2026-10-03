@@ -93,7 +93,7 @@ def main():
         c.req("index.php?seite=gibtsnicht", expect=404); ok += 1
 
         # Alle Module aufrufen
-        for m in ["dashboard", "seiten", "news", "medien", "mitglieder", "unterstuetzer", "blutspende", "rezepte", "helferprofile", "profil", "benutzer", "einstellungen", "protokoll"]:
+        for m in ["dashboard", "seiten", "news", "medien", "mitglieder", "unterstuetzer", "blutspende", "rezepte", "helferprofile", "stellen", "profil", "benutzer", "einstellungen", "protokoll"]:
             c.req(f"admin.php?m={m}")
         ok += 1
 
@@ -176,7 +176,7 @@ def main():
         c.req(f"admin.php?m=blutspende&a=einkauf_druck&id={tid}")
         html = c.req(f"admin.php?m=blutspende&a=termin&id={tid}&tab=personal")
         assert "beginn<" not in html and "ende–" not in html, "Platzhalter in Standard-Schichten nicht ersetzt"
-        assert "Aufbau <small class=\"muted\">13:30–15:30" in html
+        assert re.search(r'Aufbau( <a class="job-link"[^>]*>ⓘ</a>)? <small class="muted">13:30–15:30', html), "Aufbau 13:30–15:30"
         sid = re.search(r'name="sid" value="(\d+)"', html).group(1)
         c.post(f"admin.php?m=blutspende&a=einteilen&id={tid}", {"sid": sid, "mitglied_id": mid, "status": "zugesagt"})
         html = c.req(f"admin.php?m=blutspende&a=termin&id={tid}&tab=personal")
@@ -228,6 +228,27 @@ def main():
         assert "Muster, Anna" in c.req("admin.php?m=helferprofile&a=telefonliste")
         assert f"m=helferprofile&amp;a=profil&amp;id={mid}" in c.req(f"admin.php?m=blutspende&a=termin&id={tid}&tab=personal"); ok += 1
 
+        # Stellenbeschreibungen (Blutspende)
+        html = c.req("admin.php?m=stellen")
+        assert html.count('class="profile-card job-card"') == 7, "7 Vorlagen bei der Einrichtung"
+        kid = re.search(r'a=ansehen&amp;id=(\d+)">\s*<h3>Küche', html).group(1)
+        html = c.req(f"admin.php?m=stellen&a=ansehen&id={kid}")
+        assert "Hygienebelehrung (§ 43 IfSG)" in html and 'class="job-checklist"' in html and "Gemeindehaus" in html
+        html = c.req(f"admin.php?m=blutspende&a=termin&id={tid}&tab=personal")
+        assert f"m=stellen&amp;a=ansehen&amp;id={kid}" in html, "Schicht verlinkt Stellenbeschreibung"
+        assert 'list="stellen"' in html and '<option value="Küche">' in html
+        c.req("admin.php?m=stellen&a=neu")
+        html = c.post("admin.php?m=stellen&a=speichern", {"titel": "Parkplatzeinweisung", "kurz": "Autos einweisen",
+                                                           "ablauf": "Warnweste anziehen\nPylonen aufstellen", "sortierung": "80"})
+        assert "Parkplatzeinweisung" in html and "Pylonen aufstellen" in html
+        c.req("admin.php?m=stellen&a=neu")
+        assert "gibt es bereits" in c.post("admin.php?m=stellen&a=speichern", {"titel": "KÜCHE", "sortierung": "1"})
+        html = c.req("admin.php?m=stellen&a=druck")
+        assert "Einweisungsmappe" in html and "Parkplatzeinweisung" in html and "Ruheraum/Betreuung" in html
+        c.req(f"admin.php?m=stellen&a=ansehen&id={kid}")
+        c.post(f"admin.php?m=stellen&a=loeschen&id={kid}", {})
+        assert "1 Vorlagen angelegt" in c.post("admin.php?m=stellen&a=vorlagen", {}); ok += 1
+
         # Benutzer für Helferin anlegen, als Helferin anmelden und selbst eintragen
         c.req(f"admin.php?m=benutzer&a=neu&mitglied={mid}")
         c.post("admin.php?m=benutzer&a=speichern", {"benutzername": "anna", "name": "Anna Muster", "passwort": "helferin12345",
@@ -240,7 +261,13 @@ def main():
         assert "Ich helfe mit" in html
         s2 = re.findall(r'm=profil&amp;a=eintragen".*?name="sid" value="(\d+)"', html, re.S)[0]
         h.post("admin.php?m=profil&a=eintragen", {"sid": s2})
-        assert "Du bist dabei" in h.req("admin.php?m=profil")
+        html = h.req("admin.php?m=profil")
+        assert "Du bist dabei" in html and "m=stellen&amp;a=ansehen" in html, "Selbst-Eintragung verlinkt Stellenbeschreibungen"
+        html = h.req("admin.php?m=stellen")
+        assert "Küche" in html and "Neue Stellenbeschreibung" not in html, "Helfer/innen dürfen nur lesen"
+        sid_k = re.search(r'a=ansehen&amp;id=(\d+)">\s*<h3>Anmeldung', html).group(1)
+        assert "Bearbeiten" not in h.req(f"admin.php?m=stellen&a=ansehen&id={sid_k}")
+        h.post(f"admin.php?m=stellen&a=speichern&id={sid_k}", {"titel": "gehackt"}, expect=403)
         h.req("admin.php?m=mitglieder", expect=403)
         h.req("admin.php?m=einstellungen", expect=403)
         h.req("admin.php?m=helferprofile", expect=403)

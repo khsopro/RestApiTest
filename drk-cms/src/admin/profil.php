@@ -114,7 +114,10 @@ if (is_post()) {
     <?php return; endif; ?>
 
 <section class="panel" id="einsaetze">
-    <h2>Blutspende – Helfer/innen gesucht</h2>
+    <div class="head-row">
+        <h2>Blutspende – Helfer/innen gesucht</h2>
+        <a href="<?= e(url_admin('stellen')) ?>">Was ist bei welcher Aufgabe zu tun? →</a>
+    </div>
     <?php
     $termine = all('SELECT * FROM bs_termine WHERE datum >= ? ORDER BY datum LIMIT 6', [date('Y-m-d')]);
     if (!$termine): ?><p class="muted">Aktuell sind keine Termine geplant.</p><?php endif;
@@ -130,7 +133,7 @@ if (is_post()) {
                 $free = (int)$s['benoetigt'] - (int)$s['belegt'];
                 $hasQuali = !$s['qualifikation'] || str_contains((string)$member['qualifikationen'], $s['qualifikation']); ?>
                 <tr>
-                    <td><strong><?= e($s['aufgabe']) ?></strong><?php if ($s['qualifikation']): ?><br><small class="muted">benötigt: <?= e($s['qualifikation']) ?></small><?php endif; ?></td>
+                    <td><strong><?= e($s['aufgabe']) ?></strong><?= job_link($s['aufgabe']) ?><?php if ($s['qualifikation']): ?><br><small class="muted">benötigt: <?= e($s['qualifikation']) ?></small><?php endif; ?></td>
                     <td><?= e($s['von']) ?>–<?= e($s['bis']) ?></td>
                     <td><?= $free > 0 ? '<span class="badge warn">' . $free . ' frei</span>' : '<span class="badge ok">voll</span>' ?></td>
                     <td class="right">

@@ -302,6 +302,7 @@ function form_field(array $f, array $row): string
             break;
         default:
             $step = $type === 'number' ? ' step="' . e($opts['step'] ?? '1') . '"' : '';
+            $step .= !empty($opts['list']) ? ' list="' . e($opts['list']) . '"' : '';
             $html .= '<label for="' . $id . '">' . e($label) . '</label><input id="' . $id . '" type="' . e($type)
                 . '" name="' . e($name) . '" value="' . e($value) . '"' . $step . $req . '>';
     }

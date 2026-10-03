@@ -190,3 +190,72 @@ function qualification_tags(string $list, string $highlight = ''): string
         $items
     )) . '</div>';
 }
+
+/* ---------- Stellenbeschreibungen ---------- */
+
+/** Zuordnung Aufgabenname (klein geschrieben) → ID der Stellenbeschreibung */
+function job_ids(): array
+{
+    static $map = null;
+    if ($map === null) {
+        $map = [];
+        foreach (all('SELECT id, titel FROM bs_stellen') as $r) {
+            $map[mb_strtolower(trim($r['titel']))] = (int)$r['id'];
+        }
+    }
+    return $map;
+}
+
+/** Link „ⓘ“ zur Stellenbeschreibung einer Schicht-Aufgabe (leer, wenn keine existiert) */
+function job_link(string $aufgabe, string $label = 'ⓘ'): string
+{
+    $id = job_ids()[mb_strtolower(trim($aufgabe))] ?? null;
+    return $id ? ' <a class="job-link" href="' . e(url_admin('stellen', 'ansehen', ['id' => $id])) . '" title="Stellenbeschreibung „' . e($aufgabe) . '“">' . e($label) . '</a>' : '';
+}
+
+/** Vorlagen passend zu den Standard-Schichten */
+function seed_job_descriptions(): int
+{
+    $jobs = [
+        ['Aufbau', 'Räume für den Blutspendetermin vorbereiten.',
+            "- Liegen, Tische und Stühle nach Raumplan aufstellen\n- Wegweiser und Plakate am Eingang anbringen\n- Material des Blutspendedienstes entgegennehmen und verteilen",
+            "Schlüssel abholen\nRaumplan prüfen\nLiegen aufbauen\nAnmeldung und Wartebereich einrichten\nRuheraum herrichten\nWegweiser aufhängen",
+            "Körperlich belastbar (Tragen von Tischen und Liegen).", '', 'ca. 2 Stunden vor Beginn', "Feste Schuhe tragen. Schwere Teile immer zu zweit tragen."],
+        ['Anmeldung', 'Erste Anlaufstelle für Spenderinnen und Spender.',
+            "- Spender/innen freundlich begrüßen\n- Personalausweis und Spendeausweis kontrollieren\n- Fragebogen ausgeben und bei Fragen helfen\n- Erstspender/innen besonders betreuen und den Ablauf erklären",
+            "Ausweise prüfen\nFragebogen und Kugelschreiber bereitlegen\nWartenummern vergeben\nErstspender/innen kennzeichnen",
+            "Freundliches Auftreten, Geduld, gute Deutschkenntnisse.", '', 'gesamte Spendezeit', "Datenschutz beachten: keine Fragebögen offen liegen lassen."],
+        ['Arztzimmer/Labor-Unterstützung', 'Unterstützung des Teams vom Blutspendedienst.',
+            "- Spender/innen zum Arzt und zur Laboruntersuchung begleiten\n- Material nachfüllen\n- Bei Kreislaufproblemen sofort Hilfe holen",
+            "Material nach Absprache nachfüllen\nWartebereich im Blick behalten",
+            "Sanitätsausbildung erforderlich.", 'Sanitätshelfer/in', 'gesamte Spendezeit', "Anweisungen des ärztlichen Personals haben Vorrang. Schweigepflicht beachten."],
+        ['Ruheraum/Betreuung', 'Spender/innen nach der Entnahme betreuen.',
+            "- Spender/innen nach der Spende in den Ruheraum begleiten\n- Getränke anbieten\n- Auf Anzeichen von Kreislaufproblemen achten (Blässe, Schwindel, Schweiß)\n- Erst nach ausreichender Ruhezeit zum Imbiss schicken",
+            "Getränke bereitstellen\nDecken und Kissen bereitlegen\nNotfallausrüstung prüfen",
+            "Erste-Hilfe-Kenntnisse, ruhige Art.", 'Erste-Hilfe-Kurs', 'gesamte Spendezeit', "Bei Problemen sofort das ärztliche Personal rufen. Spender/innen nie allein lassen."],
+        ['Küche', 'Zubereitung des Imbisses für die Spender/innen.',
+            "- Gerichte nach Menüplan und Rezepten zubereiten\n- Zutaten von der Einkaufsliste kontrollieren\n- Kühlkette einhalten\n- Küche sauber halten und Geschirr spülen",
+            "Hände waschen und desinfizieren\nSchürze und Haarnetz anlegen\nKühlschranktemperatur prüfen (max. 7 °C)\nGerichte nach Rezept zubereiten\nReste korrekt entsorgen\nKüche reinigen",
+            "Gültige Belehrung nach § 43 Infektionsschutzgesetz.", 'Hygienebelehrung (§ 43 IfSG)', 'ab ca. 2,5 Stunden vor Beginn bis Ende',
+            "Wer Durchfall, Erbrechen, Fieber oder offene Wunden an den Händen hat, darf nicht in der Küche arbeiten. Schmuck an Händen und Unterarmen ablegen."],
+        ['Imbiss-Ausgabe', 'Ausgabe von Essen und Getränken an die Spender/innen.',
+            "- Speisen ansprechend anrichten und ausgeben\n- Auf Allergene hinweisen (Aushang)\n- Tische abräumen und sauber halten\n- Nachschub aus der Küche anfordern",
+            "Allergen-Aushang aufhängen\nAusgabetheke einrichten\nGeschirr und Besteck bereitstellen",
+            "Gültige Belehrung nach § 43 Infektionsschutzgesetz.", 'Hygienebelehrung (§ 43 IfSG)', 'gesamte Spendezeit',
+            "Speisen nur mit Besteck oder Handschuhen anfassen. Warme Speisen über 65 °C, kalte unter 7 °C halten."],
+        ['Abbau', 'Räume nach dem Termin wieder herrichten.',
+            "- Liegen, Tische und Stühle abbauen und verstauen\n- Müll trennen und entsorgen\n- Räume besenrein übergeben",
+            "Material des Blutspendedienstes übergeben\nMöbel zurückstellen\nMüll entsorgen\nFenster schließen, Licht aus, abschließen\nSchlüssel zurückgeben",
+            "Körperlich belastbar.", '', 'ca. 1,5 Stunden nach Ende', "Feste Schuhe tragen."],
+    ];
+    $n = 0;
+    foreach ($jobs as $i => [$titel, $kurz, $aufgaben, $ablauf, $anf, $quali, $zeit, $hinweise]) {
+        if (val('SELECT id FROM bs_stellen WHERE titel = ?', [$titel])) {
+            continue;
+        }
+        insert('bs_stellen', ['titel' => $titel, 'kurz' => $kurz, 'aufgaben' => $aufgaben, 'ablauf' => $ablauf, 'anforderungen' => $anf,
+            'qualifikation' => $quali, 'zeitaufwand' => $zeit, 'hinweise' => $hinweise, 'ansprechpartner' => '', 'sortierung' => $i * 10, 'aktualisiert' => now()]);
+        $n++;
+    }
+    return $n;
+}
