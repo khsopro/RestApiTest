@@ -339,3 +339,68 @@ function post_button(string $action, string $label, array $fields = [], string $
     }
     return $html . '<button class="' . e($class) . '" title="' . e($title) . '"' . ($disabled ? ' disabled' : '') . '>' . e($label) . '</button></form>';
 }
+
+/**
+ * Prüft und speichert eine hochgeladene Datei in uploads/ und legt sie in der Medienliste an.
+ * @param array $file Eintrag aus $_FILES (name, tmp_name, error, size)
+ * @return int|string ID der Datei oder eine Fehlermeldung
+ */
+function store_upload(array $file, string $alt = '', bool $imagesOnly = false): int|string
+{
+    $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'];
+    if (!$imagesOnly) {
+        $allowed['application/pdf'] = 'pdf';
+    }
+    $orig = (string)($file['name'] ?? '');
+    if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK || !is_uploaded_file((string)$file['tmp_name'])) {
+        return 'Fehler beim Hochladen von „' . $orig . '“.';
+    }
+    $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']) ?: '';
+    if (!isset($allowed[$mime])) {
+        return '„' . $orig . '“: Dateityp nicht erlaubt (erlaubt: ' . strtoupper(implode(', ', $allowed)) . ').';
+    }
+    if ($file['size'] > (int)cfg('upload_max_mb', 8) * 1024 * 1024) {
+        return '„' . $orig . '“ ist zu groß (max. ' . cfg('upload_max_mb', 8) . ' MB).';
+    }
+    $dir = CMS_ROOT . '/uploads';
+    $name = date('Ymd') . '-' . bin2hex(random_bytes(6)) . '.' . $allowed[$mime];
+    if (!move_uploaded_file($file['tmp_name'], $dir . '/' . $name)) {
+        return '„' . $orig . '“ konnte nicht gespeichert werden. Schreibrechte für den Ordner uploads/ prüfen.';
+    }
+    shrink_image($dir . '/' . $name, $mime);
+    return insert('medien', ['dateiname' => $name, 'original' => mb_substr($orig, 0, 250), 'mime' => $mime,
+        'groesse' => filesize($dir . '/' . $name), 'alt_text' => $alt !== '' ? $alt : pathinfo($orig, PATHINFO_FILENAME), 'erstellt' => now()]);
+}
+
+/** Sehr große Fotos (z. B. vom Handy) auf max. 2000 px verkleinern, falls GD vorhanden ist. */
+function shrink_image(string $path, string $mime, int $maxSide = 2000): void
+{
+    if (!function_exists('imagecreatetruecolor') || !in_array($mime, ['image/jpeg', 'image/png', 'image/webp'], true)) {
+        return;
+    }
+    $size = @getimagesize($path);
+    if (!$size || max($size[0], $size[1]) <= $maxSide) {
+        return;
+    }
+    $src = match ($mime) {
+        'image/jpeg' => @imagecreatefromjpeg($path),
+        'image/png'  => @imagecreatefrompng($path),
+        'image/webp' => @imagecreatefromwebp($path),
+    };
+    if (!$src) {
+        return;
+    }
+    $ratio = $maxSide / max($size[0], $size[1]);
+    $w = (int)round($size[0] * $ratio);
+    $h = (int)round($size[1] * $ratio);
+    $dst = imagecreatetruecolor($w, $h);
+    imagealphablending($dst, false);
+    imagesavealpha($dst, true);
+    imagecopyresampled($dst, $src, 0, 0, 0, 0, $w, $h, $size[0], $size[1]);
+    match ($mime) {
+        'image/jpeg' => imagejpeg($dst, $path, 85),
+        'image/png'  => imagepng($dst, $path, 8),
+        'image/webp' => imagewebp($dst, $path, 85),
+    };
+}
+

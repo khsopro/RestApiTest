@@ -1,10 +1,6 @@
 <?php
 /** Bilder & Dateien */
 
-$allowed = [
-    'image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp',
-    'application/pdf' => 'pdf',
-];
 $dir = CMS_ROOT . '/uploads';
 $id = (int)get('id', 0);
 
@@ -12,33 +8,16 @@ if (is_post()) {
     if ($a === 'hochladen') {
         $files = $_FILES['dateien'] ?? null;
         $ok = 0;
-        $max = (int)cfg('upload_max_mb', 8) * 1024 * 1024;
         if ($files && is_array($files['name'])) {
-            $finfo = new finfo(FILEINFO_MIME_TYPE);
             foreach ($files['name'] as $i => $orig) {
-                if ($files['error'][$i] !== UPLOAD_ERR_OK) {
-                    flash('Fehler beim Hochladen von „' . $orig . '“.', 'error');
-                    continue;
+                $result = store_upload([
+                    'name' => $orig, 'tmp_name' => $files['tmp_name'][$i], 'error' => $files['error'][$i], 'size' => $files['size'][$i],
+                ], (string)post('alt_text'));
+                if (is_string($result)) {
+                    flash($result, 'error');
+                } else {
+                    $ok++;
                 }
-                $mime = $finfo->file($files['tmp_name'][$i]) ?: '';
-                if (!isset($allowed[$mime])) {
-                    flash('„' . $orig . '“: Dateityp nicht erlaubt (erlaubt: JPG, PNG, GIF, WebP, PDF).', 'error');
-                    continue;
-                }
-                if ($files['size'][$i] > $max) {
-                    flash('„' . $orig . '“ ist zu groß (max. ' . cfg('upload_max_mb', 8) . ' MB).', 'error');
-                    continue;
-                }
-                $name = date('Ymd') . '-' . bin2hex(random_bytes(6)) . '.' . $allowed[$mime];
-                if (!move_uploaded_file($files['tmp_name'][$i], $dir . '/' . $name)) {
-                    flash('„' . $orig . '“ konnte nicht gespeichert werden. Schreibrechte für den Ordner uploads/ prüfen.', 'error');
-                    continue;
-                }
-                shrink_image($dir . '/' . $name, $mime);
-                $alt = pathinfo((string)$orig, PATHINFO_FILENAME);
-                insert('medien', ['dateiname' => $name, 'original' => mb_substr((string)$orig, 0, 250), 'mime' => $mime,
-                    'groesse' => filesize($dir . '/' . $name), 'alt_text' => post('alt_text') ?: $alt, 'erstellt' => now()]);
-                $ok++;
             }
         }
         if ($ok) {
@@ -57,6 +36,7 @@ if (is_post()) {
             q('DELETE FROM medien WHERE id = ?', [$id]);
             q('UPDATE seiten SET hero_bild = NULL WHERE hero_bild = ?', [$id]);
             q('UPDATE unterstuetzer SET logo = NULL WHERE logo = ?', [$id]);
+            q('UPDATE mitglieder SET foto = NULL WHERE foto = ?', [$id]);
             $path = $dir . '/' . basename($f['dateiname']);
             if (is_file($path)) {
                 unlink($path);
@@ -65,38 +45,6 @@ if (is_post()) {
         }
         redirect(url_admin('medien'));
     }
-}
-
-/** Sehr große Fotos (z. B. vom Handy) auf max. 2000 px verkleinern, falls GD vorhanden ist. */
-function shrink_image(string $path, string $mime, int $maxSide = 2000): void
-{
-    if (!function_exists('imagecreatetruecolor') || !in_array($mime, ['image/jpeg', 'image/png', 'image/webp'], true)) {
-        return;
-    }
-    $size = @getimagesize($path);
-    if (!$size || max($size[0], $size[1]) <= $maxSide) {
-        return;
-    }
-    $src = match ($mime) {
-        'image/jpeg' => @imagecreatefromjpeg($path),
-        'image/png'  => @imagecreatefrompng($path),
-        'image/webp' => @imagecreatefromwebp($path),
-    };
-    if (!$src) {
-        return;
-    }
-    $ratio = $maxSide / max($size[0], $size[1]);
-    $w = (int)round($size[0] * $ratio);
-    $h = (int)round($size[1] * $ratio);
-    $dst = imagecreatetruecolor($w, $h);
-    imagealphablending($dst, false);
-    imagesavealpha($dst, true);
-    imagecopyresampled($dst, $src, 0, 0, 0, 0, $w, $h, $size[0], $size[1]);
-    match ($mime) {
-        'image/jpeg' => imagejpeg($dst, $path, 85),
-        'image/png'  => imagepng($dst, $path, 8),
-        'image/webp' => imagewebp($dst, $path, 85),
-    };
 }
 
 $media = all('SELECT * FROM medien ORDER BY id DESC');

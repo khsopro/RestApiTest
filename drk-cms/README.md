@@ -33,6 +33,7 @@ Ein schlankes Content-Management-System für DRK-Ortsvereine: öffentliche Websi
 | **Blutspende – Menü** | Rezepte mit Portionen pro Termin einplanen, Menü früherer Termine übernehmen |
 | **Blutspende – Einkaufsliste** | wird **automatisch** aus Menü und Portionen berechnet, gleiche Zutaten werden zusammengefasst (g/kg, ml/l), nach Abteilungen sortiert, druckbar mit Abhak-Kästchen |
 | **Blutspende – Personaleinteilung** | Schichten je Termin (Vorlage einstellbar), Einteilung mit Status *zugesagt/angefragt/abgesagt*, Hinweis auf passende Qualifikation (✓) und Überschneidungen (⚠), druckbarer Dienstplan |
+| **Blutspende – Helfer-Profile** | Übersicht aller Helfer/innen des Blutspende-Teams als Profilkarten: Foto, Kontakt, Qualifikationen, Verfügbarkeit, Anzahl Einsätze und nächster Einsatz. Filter nach Qualifikation, Detailansicht mit Einsatzhistorie und häufigsten Aufgaben, druckbare Telefonliste |
 | **Selbst-Eintragung** | Helfer/innen tragen sich unter *Mein Profil* selbst in offene Schichten ein |
 | **Rezepte** | Zutaten mit Menge, Einheit, Einkaufsabteilung, Allergene, vegetarisch, Zubereitung, Erfahrungs-Notizen |
 | **Bilder & Dateien** | Upload von JPG/PNG/GIF/WebP/PDF, große Handyfotos werden automatisch verkleinert |
@@ -46,7 +47,7 @@ Ein schlankes Content-Management-System für DRK-Ortsvereine: öffentliche Websi
 | `admin` | alles, inkl. Benutzer und Einstellungen |
 | `redaktion` | Seiten, Aktuelles und Medien |
 | `verwaltung` | Mitglieder und Unterstützer |
-| `blutspende` | Termine, Rezepte, Menü, Einkauf, Personaleinteilung |
+| `blutspende` | Termine, Rezepte, Menü, Einkauf, Personaleinteilung, Helfer-Profile (nur lesen) |
 | `helfer` | nur eigenes Profil und Selbst-Eintragung in Schichten |
 
 Ein Benutzer kann mehrere Rollen haben. Wird ein Benutzerkonto mit einem Mitgliederprofil verknüpft, sieht die Person ihre eigenen Einsätze.
@@ -67,7 +68,7 @@ Ein Benutzer kann mehrere Rollen haben. Wird ein Benutzerkonto mit einem Mitglie
 Wenn der Server `mod_rewrite` unterstützt, in `config.php` `'pretty_urls' => true` setzen. Dann lauten die Adressen `/blutspende` statt `/index.php?seite=blutspende`.
 
 ### Update einer bestehenden Installation
-Neue Tabellen (z. B. `news`) werden beim nächsten Aufruf automatisch angelegt. Beispielseiten werden nur bei der Ersteinrichtung erstellt. Für den Newsbereich daher einmalig eine Seite „Aktuelles“ anlegen und den Baustein **Aktuelles / News** mit „Blättern erlauben: Ja“ hinzufügen. Auf der Startseite zeigt ein zweiter News-Baustein (z. B. 3 Kacheln) die neuesten Meldungen.
+Neue Tabellen (z. B. `news`) und neue Spalten (z. B. das Profilfoto bei Mitgliedern) werden beim nächsten Aufruf automatisch angelegt. Beispielseiten werden nur bei der Ersteinrichtung erstellt. Für den Newsbereich daher einmalig eine Seite „Aktuelles“ anlegen und den Baustein **Aktuelles / News** mit „Blättern erlauben: Ja“ hinzufügen. Auf der Startseite zeigt ein zweiter News-Baustein (z. B. 3 Kacheln) die neuesten Meldungen.
 
 ### Lokal ausprobieren
 ```bash
@@ -132,4 +133,4 @@ drk-cms/
 
 **Neuen Baustein hinzufügen:** In `src/blocks.php` in `block_types()` Felder definieren und in `render_block()` die HTML-Ausgabe ergänzen.
 
-**Neues Datenbankfeld:** In `src/db.php` ergänzen. Bei bestehenden Installationen die Spalte zusätzlich per `ALTER TABLE` anlegen.
+**Neues Datenbankfeld:** In `src/db.php` in der Tabellendefinition und in der Liste `$added` ergänzen. Bestehende Installationen erhalten die Spalte dann automatisch.

@@ -44,6 +44,7 @@ if (is_post()) {
         if (!array_key_exists($data['status'], $statusOptions)) {
             $data['status'] = 'aktiv';
         }
+        $data['foto'] = (int)post('foto') ?: null;
         $data['aktualisiert'] = now();
         if ($id) {
             update('mitglieder', $data, $id);
@@ -136,7 +137,8 @@ if ($a === 'neu' || $a === 'bearbeiten') {
         <?= csrf_field() ?>
         <section class="panel"><h2>Person &amp; Kontakt</h2><div class="form-grid"><?= form_fields($fieldsPerson, $row) ?></div></section>
         <section class="panel"><h2>Mitgliedschaft</h2><div class="form-grid"><?= form_fields($fieldsMembership, $row) ?></div></section>
-        <section class="panel"><h2>Helfer-Profil</h2><div class="form-grid"><?= form_fields($fieldsProfile, $row) ?></div></section>
+        <section class="panel"><h2>Helfer-Profil</h2><div class="form-grid"><?= form_fields($fieldsProfile, $row) ?>
+            <div class="field wide"><label>Profilfoto (nur mit Einwilligung)</label><?= image_picker('foto', (string)($row['foto'] ?? '')) ?></div></div></section>
         <div class="actions sticky-actions"><button class="btn">Speichern</button> <a href="<?= e(url_admin('mitglieder')) ?>">Abbrechen</a></div>
     </form>
 

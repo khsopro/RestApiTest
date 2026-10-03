@@ -364,7 +364,7 @@ if ($a === 'termin') {
                             }
                             $qualified = $s['qualifikation'] && str_contains((string)$e['qualifikationen'], $s['qualifikation']); ?>
                             <li class="st-<?= e($e['status']) ?>">
-                                <span><?= e(member_name($e)) ?><?= $qualified ? ' <span title="Qualifikation vorhanden">✓</span>' : '' ?>
+                                <span><a href="<?= e(url_admin('helferprofile', 'profil', ['id' => $e['mitglied_id']])) ?>"><?= e(member_name($e)) ?></a><?= $qualified ? ' <span title="Qualifikation vorhanden">✓</span>' : '' ?>
                                     <?= $conflict ? ' <span class="warn-text" title="Überschneidung mit: ' . e($conflict) . '">⚠</span>' : '' ?>
                                     <small class="muted"><?= e($e['mobil'] ?: $e['telefon']) ?></small></span>
                                 <form method="post" action="<?= e(url_admin('blutspende', 'einteilung_status', ['id' => $id])) ?>" class="inline">

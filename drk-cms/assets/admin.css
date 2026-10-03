@@ -223,3 +223,25 @@ body.bare { display: grid; place-items: center; min-height: 100vh; padding: 20px
     table.list { display: block; overflow-x: auto; }
     .block-list li { flex-wrap: wrap; }
 }
+
+.side nav a.sub { padding-left: 34px; font-size: .92rem; }
+
+/* Helfer-Profile */
+.profile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.profile-card { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; display: flex; flex-direction: column; gap: 10px; }
+.profile-head { display: flex; gap: 14px; align-items: center; }
+.profile-head h3 { margin: 0; }
+.profile-head a { color: var(--text); text-decoration: none; }
+.profile-head a:hover { color: var(--rot); }
+.avatar { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; flex: none; background: var(--rot); color: #fff;
+    display: grid; place-items: center; font-weight: 700; font-size: 1.4rem; }
+.avatar.big { width: 120px; height: 120px; font-size: 2.6rem; }
+.tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.tag { font-size: .75rem; padding: 2px 8px; border-radius: 20px; background: #fdeceb; color: var(--rot-dunkel); font-weight: 600; }
+.tag.match { background: var(--ok); color: #fff; }
+.profile-stats { display: flex; gap: 16px; font-size: .85rem; color: var(--muted); border-top: 1px solid var(--line); padding-top: 10px; margin-top: auto; }
+.profile-stats strong { color: var(--text); }
+.profile-detail { display: grid; grid-template-columns: 140px 1fr; gap: 24px; align-items: start; }
+.contact-list { list-style: none; padding: 0; margin: 0; }
+.contact-list li { padding: 3px 0; }
+@media (max-width: 900px) { .profile-detail { grid-template-columns: 1fr; } }

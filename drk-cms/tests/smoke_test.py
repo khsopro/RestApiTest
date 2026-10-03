@@ -44,6 +44,23 @@ class Client:
             assert bad not in html, f"{path}: PHP-Fehler gefunden\n{html[:2000]}"
         return html
 
+    def upload(self, path, fields, file_field, filename, content, mime, expect=200):
+        """multipart/form-data senden (Datei-Upload)"""
+        boundary = "----drkcmstest"
+        body = b""
+        for k, v in dict(fields, _csrf=self.csrf).items():
+            body += f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode()
+        body += (f'--{boundary}\r\nContent-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'
+                 f'Content-Type: {mime}\r\n\r\n').encode() + content + f"\r\n--{boundary}--\r\n".encode()
+        req = urllib.request.Request(BASE + path, body, {"Content-Type": f"multipart/form-data; boundary={boundary}"})
+        try:
+            res = self.opener.open(req)
+            status, html = res.status, res.read().decode()
+        except urllib.error.HTTPError as e:
+            status, html = e.code, e.read().decode()
+        assert status == expect, f"{path}: Status {status}\n{html[:500]}"
+        return html
+
     def post(self, path, data, expect=200):
         return self.req(path, dict(data, _csrf=self.csrf), expect)
 
@@ -76,7 +93,7 @@ def main():
         c.req("index.php?seite=gibtsnicht", expect=404); ok += 1
 
         # Alle Module aufrufen
-        for m in ["dashboard", "seiten", "news", "medien", "mitglieder", "unterstuetzer", "blutspende", "rezepte", "profil", "benutzer", "einstellungen", "protokoll"]:
+        for m in ["dashboard", "seiten", "news", "medien", "mitglieder", "unterstuetzer", "blutspende", "rezepte", "helferprofile", "profil", "benutzer", "einstellungen", "protokoll"]:
             c.req(f"admin.php?m={m}")
         ok += 1
 
@@ -198,6 +215,19 @@ def main():
         feed = x.req("feed.php")
         assert "<rss" in feed and "Blutspender/innen gesucht" in feed and "Zukunftsmeldung" not in feed; ok += 1
 
+        # Helfer-Profile (Blutspende)
+        html = c.req("admin.php?m=helferprofile")
+        assert "Anna Muster" in html and "Bernd" not in html, "Team: Bereich Blutspende oder eingeteilt"
+        assert '<span class="tag">Sanitätshelfer/in</span>' in html
+        html = c.req("admin.php?m=helferprofile&alle=1")
+        assert "Anna Muster" in html and "Beispiel" in html
+        html = c.req("admin.php?m=helferprofile&alle=1&quali=Sanit%C3%A4tshelfer%2Fin")
+        assert "Anna Muster" in html and "Beispiel" not in html and 'class="tag match"' in html
+        html = c.req(f"admin.php?m=helferprofile&a=profil&id={mid}")
+        assert "Gemeindehaus" in html and "Häufigste Aufgaben" in html and "0170 123" in html
+        assert "Muster, Anna" in c.req("admin.php?m=helferprofile&a=telefonliste")
+        assert f"m=helferprofile&amp;a=profil&amp;id={mid}" in c.req(f"admin.php?m=blutspende&a=termin&id={tid}&tab=personal"); ok += 1
+
         # Benutzer für Helferin anlegen, als Helferin anmelden und selbst eintragen
         c.req(f"admin.php?m=benutzer&a=neu&mitglied={mid}")
         c.post("admin.php?m=benutzer&a=speichern", {"benutzername": "anna", "name": "Anna Muster", "passwort": "helferin12345",
@@ -212,7 +242,21 @@ def main():
         h.post("admin.php?m=profil&a=eintragen", {"sid": s2})
         assert "Du bist dabei" in h.req("admin.php?m=profil")
         h.req("admin.php?m=mitglieder", expect=403)
-        h.req("admin.php?m=einstellungen", expect=403); ok += 1
+        h.req("admin.php?m=einstellungen", expect=403)
+        h.req("admin.php?m=helferprofile", expect=403)
+        # eigenes Profilfoto hochladen (1x1-PNG) und kein PHP einschleusen
+        png = bytes.fromhex("89504e470d0a1a0a0000000d4948445200000001000000010806000000"
+                            "1f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082")
+        h.req("admin.php?m=profil")
+        h.upload("admin.php?m=profil&a=mitglied", {"mobil": "0170 123"}, "foto_datei", "ich.png", png, "image/png")
+        assert '<img src="uploads/' in h.req("admin.php?m=profil"), "Profilfoto gespeichert"
+        h.req("admin.php?m=profil")
+        html = h.upload("admin.php?m=profil&a=mitglied", {"mobil": "0170 123"}, "foto_datei", "boese.php", b"<?php echo 1;", "image/png")
+        assert "nicht erlaubt" in h.req("admin.php?m=profil") or "nicht erlaubt" in html
+        a2 = Client()
+        a2.req("admin.php?m=login")
+        a2.post("admin.php?m=login", {"benutzername": "admin", "passwort": "geheim12345"})
+        assert '<img src="uploads/' in a2.req("admin.php?m=helferprofile"), "Foto in der Profilübersicht"; ok += 1
 
         # CSRF-Schutz
         h.req("admin.php?m=profil&a=konto", {"name": "X", "_csrf": "falsch"}, expect=400); ok += 1

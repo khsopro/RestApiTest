@@ -102,6 +102,7 @@ function migrate(PDO $pdo): void
             qualifikationen TEXT,
             verfuegbarkeit TEXT,
             profil_text TEXT,
+            foto $ref NULL,
             datenschutz_einwilligung VARCHAR(10),
             notizen TEXT,
             erstellt VARCHAR(20),
@@ -206,5 +207,18 @@ function migrate(PDO $pdo): void
 
     foreach ($tables as $name => $cols) {
         $pdo->exec("CREATE TABLE IF NOT EXISTS $name ($cols)$end");
+    }
+
+    // Spalten, die nach Version 1.0 hinzugekommen sind (für bestehende Installationen)
+    $added = [
+        ['mitglieder', 'foto', "$ref NULL"],
+    ];
+    foreach ($added as [$table, $column, $definition]) {
+        $existing = $sqlite
+            ? array_column($pdo->query("PRAGMA table_info($table)")->fetchAll(), 'name')
+            : array_column($pdo->query("SHOW COLUMNS FROM $table")->fetchAll(), 'Field');
+        if (!in_array($column, $existing, true)) {
+            $pdo->exec("ALTER TABLE $table ADD COLUMN $column $definition");
+        }
     }
 }

@@ -147,3 +147,46 @@ function staffing_badge(int $have, int $need): string
     $cls = $have >= $need ? 'ok' : ($have >= $need / 2 ? 'warn' : 'bad');
     return '<span class="badge ' . $cls . '">' . $have . ' / ' . $need . ' besetzt</span>';
 }
+
+/** Profilbild eines Mitglieds oder Initialen als Ersatz */
+function member_avatar(array $m, string $class = 'avatar'): string
+{
+    $url = media_url(!empty($m['foto']) ? (int)$m['foto'] : null);
+    if ($url) {
+        return '<img src="' . e($url) . '" alt="" class="' . e($class) . '">';
+    }
+    $initials = mb_strtoupper(mb_substr((string)$m['vorname'], 0, 1) . mb_substr((string)$m['nachname'], 0, 1));
+    return '<span class="' . e($class) . '" aria-hidden="true">' . e($initials) . '</span>';
+}
+
+/** Einsatzstatistik je Mitglied: [mitglied_id => [einsaetze, letzter, naechster]] */
+function helper_stats(): array
+{
+    $today = date('Y-m-d');
+    $stats = [];
+    foreach (all("SELECT e.mitglied_id,
+            SUM(CASE WHEN t.datum < ? THEN 1 ELSE 0 END) AS einsaetze,
+            MAX(CASE WHEN t.datum < ? THEN t.datum END) AS letzter,
+            MIN(CASE WHEN t.datum >= ? THEN t.datum END) AS naechster
+        FROM bs_einteilung e
+        JOIN bs_schichten s ON s.id = e.schicht_id
+        JOIN bs_termine t ON t.id = s.termin_id
+        WHERE e.status = 'zugesagt'
+        GROUP BY e.mitglied_id", [$today, $today, $today]) as $r) {
+        $stats[(int)$r['mitglied_id']] = $r;
+    }
+    return $stats;
+}
+
+/** Qualifikationen als Schlagworte; $highlight wird hervorgehoben */
+function qualification_tags(string $list, string $highlight = ''): string
+{
+    $items = array_filter(array_map('trim', explode(',', $list)));
+    if (!$items) {
+        return '';
+    }
+    return '<div class="tags">' . implode('', array_map(
+        fn($q) => '<span class="tag' . ($q === $highlight ? ' match' : '') . '">' . e($q) . '</span>',
+        $items
+    )) . '</div>';
+}

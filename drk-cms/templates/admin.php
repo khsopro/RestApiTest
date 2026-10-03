@@ -27,9 +27,9 @@ $user = current_user();
             <span><?= e(setting('seitentitel')) ?></span>
         </a>
         <nav>
-            <?php foreach ($modules as $key => [$role, $label, $icon]):
+            <?php foreach ($modules as $key => $mod): [$role, $label, $icon] = $mod; $isSub = $mod[3] ?? false;
                 if ($role !== '' && !has_role($role)) continue; ?>
-                <a href="<?= e(url_admin($key)) ?>" class="<?= $key === $m ? 'active' : '' ?>"><span class="ico"><?= $icon ?></span><?= e($label) ?></a>
+                <a href="<?= e(url_admin($key)) ?>" class="<?= $key === $m ? 'active' : '' ?><?= $isSub ? ' sub' : '' ?>"><span class="ico"><?= $icon ?></span><?= e($label) ?></a>
             <?php endforeach; ?>
         </nav>
         <div class="side-foot">

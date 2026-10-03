@@ -42,7 +42,18 @@ if (is_post()) {
 
         case 'mitglied':
             if ($member) {
-                update('mitglieder', form_collect($ownFields) + ['aktualisiert' => now()], $mid);
+                $foto = $member['foto'];
+                if (!empty($_FILES['foto_datei']['name'])) {
+                    $result = store_upload($_FILES['foto_datei'], 'Profilfoto ' . member_name($member), true);
+                    if (is_string($result)) {
+                        flash($result, 'error');
+                    } else {
+                        $foto = $result;
+                    }
+                } elseif (isset($_POST['foto_entfernen'])) {
+                    $foto = null;
+                }
+                update('mitglieder', form_collect($ownFields) + ['foto' => $foto, 'aktualisiert' => now()], $mid);
                 audit('Eigenes Profil geändert', member_name($member));
                 flash('Profil gespeichert.');
             }
@@ -141,8 +152,17 @@ if (is_post()) {
 <section class="panel">
     <h2>Meine Daten &amp; Qualifikationen</h2>
     <p class="muted small">Diese Angaben sieht die Vereinsverwaltung. Name, Geburtsdatum und Mitgliedsstatus ändert die Verwaltung.</p>
-    <form method="post" action="<?= e(url_admin('profil', 'mitglied')) ?>" class="form-grid">
+    <form method="post" action="<?= e(url_admin('profil', 'mitglied')) ?>" class="form-grid" enctype="multipart/form-data">
         <?= csrf_field() ?>
+        <div class="field wide profile-head">
+            <?= member_avatar($member, 'avatar big') ?>
+            <div class="field">
+                <label for="foto_datei">Profilfoto (JPG, PNG oder WebP)</label>
+                <input id="foto_datei" type="file" name="foto_datei" accept="image/jpeg,image/png,image/webp">
+                <?php if ($member['foto']): ?><label class="check"><input type="checkbox" name="foto_entfernen" value="1"> Foto entfernen</label><?php endif; ?>
+                <small>Das Foto sehen nur das Blutspende-Team und die Vereinsverwaltung.</small>
+            </div>
+        </div>
         <?= form_fields($ownFields, $member) ?>
         <div class="actions wide"><button class="btn">Profil speichern</button></div>
     </form>
