@@ -1,0 +1,5 @@
+config.php
+data/*
+!data/.htaccess
+uploads/*
+!uploads/.htaccess
