@@ -1,0 +1,15 @@
+# Interne Verzeichnisse und Dateien schützen
+RedirectMatch 403 ^.*/(src|templates|data|tests)/
+<FilesMatch "^(config(\.sample)?\.php|README\.md|.*\.sqlite)$">
+    Require all denied
+</FilesMatch>
+
+Options -Indexes
+
+# Schöne URLs (in config.php 'pretty_urls' => true setzen)
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^([a-z0-9-]+)/?$ index.php?seite=$1 [L,QSA]
+</IfModule>
