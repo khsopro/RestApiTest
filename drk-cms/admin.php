@@ -107,6 +107,7 @@ if ($m === 'logout' && is_post()) {
 $modules = [
     'dashboard'     => ['',           'Übersicht',     '⌂'],
     'seiten'        => ['redaktion',  'Seiten',        '▤'],
+    'news'          => ['redaktion',  'Aktuelles',     '✎'],
     'medien'        => ['redaktion',  'Bilder & Dateien', '▣'],
     'mitglieder'    => ['verwaltung', 'Mitglieder',    '☺'],
     'unterstuetzer' => ['verwaltung', 'Unterstützer',  '★'],

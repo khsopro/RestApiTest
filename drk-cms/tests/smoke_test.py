@@ -70,13 +70,13 @@ def main():
         assert "Hallo Test Admin" in html; ok += 1
 
         # Öffentliche Seiten
-        for slug in ["", "?seite=ueber-uns", "?seite=bereitschaft", "?seite=blutspende", "?seite=mitmachen", "?seite=kontakt", "?seite=impressum"]:
+        for slug in ["", "?seite=aktuelles", "?seite=ueber-uns", "?seite=bereitschaft", "?seite=blutspende", "?seite=mitmachen", "?seite=kontakt", "?seite=impressum"]:
             html = c.req("index.php" + slug)
             assert "DRK-Ortsverein Teststadt" in html
         c.req("index.php?seite=gibtsnicht", expect=404); ok += 1
 
         # Alle Module aufrufen
-        for m in ["dashboard", "seiten", "medien", "mitglieder", "unterstuetzer", "blutspende", "rezepte", "profil", "benutzer", "einstellungen", "protokoll"]:
+        for m in ["dashboard", "seiten", "news", "medien", "mitglieder", "unterstuetzer", "blutspende", "rezepte", "profil", "benutzer", "einstellungen", "protokoll"]:
             c.req(f"admin.php?m={m}")
         ok += 1
 
@@ -99,7 +99,7 @@ def main():
 
         # Alle Bausteintypen anlegen und rendern
         for typ in ["bild_text", "bild", "zwei_spalten", "kacheln", "unterseiten", "hinweis", "button", "akkordeon", "kontakt", "zahlen",
-                    "blutspendetermine", "unterstuetzer", "karte"]:
+                    "blutspendetermine", "unterstuetzer", "karte", "news"]:
             c.req(f"admin.php?m=seiten&a=bearbeiten&id={pid}")
             html = c.post(f"admin.php?m=seiten&a=block_neu&id={pid}", {"typ": typ})
             b = re.search(r'm=seiten&amp;a=block&amp;id=(\d+)', html).group(1)
@@ -167,6 +167,36 @@ def main():
         html = c.req(f"admin.php?m=blutspende&a=dienstplan_druck&id={tid}")
         assert "Anna Muster" in html
         assert "Gemeindehaus" in c.req("index.php?seite=blutspende"); ok += 1
+
+        # Aktuelles / News
+        html = c.req("index.php")
+        assert "Neue Sanitätsrucksäcke" in html and "Alle Meldungen" in html, "News-Kacheln auf der Startseite"
+        assert 'href="index.php?seite=blutspende"' in html, "Seitenkürzel in Textlinks auflösen"
+        html = c.req("index.php?seite=aktuelles")
+        assert "Blutspender/innen gesucht" in html and "Wichtig</span>" in html
+        assert "Jugendrotkreuz-Gruppe" in html, "Bindestriche in der Kurzfassung erhalten"
+        html = c.req("index.php?news=neue-sanitaetsrucksaecke-fuer-die-bereitschaft")
+        assert "<h2>Was ist neu?</h2>" in html and "Alle Meldungen" in html
+        c.req("admin.php?m=news&a=neu")
+        c.post("admin.php?m=news&a=speichern", {"titel": "Zukunftsmeldung", "datum": "2099-01-01", "inhalt": "geplant", "veroeffentlicht": "1"})
+        c.req("admin.php?m=news&a=neu")
+        c.post("admin.php?m=news&a=speichern", {"titel": "Entwurf <b>X</b>", "datum": "2020-01-01", "inhalt": "geheim"})
+        for i in range(12):
+            c.req("admin.php?m=news&a=neu")
+            c.post("admin.php?m=news&a=speichern", {"titel": f"Meldung {i}", "datum": "2021-01-01", "inhalt": "Text", "veroeffentlicht": "1",
+                                                     "kategorie": "Blutspende"})
+        html = c.req("admin.php?m=news")
+        assert "geplant</span>" in html and "Entwurf</span>" in html
+        html = c.req("index.php?seite=aktuelles")
+        assert "Zukunftsmeldung" not in html and "Entwurf" not in html, "geplante/Entwürfe nicht öffentlich"
+        assert 'class="pager"' in html and "seite=aktuelles&amp;p=2" in html
+        assert "Meldung" in c.req("index.php?seite=aktuelles&p=2")
+        x = Client()
+        x.req("index.php?news=zukunftsmeldung", expect=404)
+        x.req("index.php?news=entwurf-b-x-b", expect=404)
+        assert "Vorschau" in c.req("index.php?news=zukunftsmeldung"), "Redaktion darf Vorschau sehen"
+        feed = x.req("feed.php")
+        assert "<rss" in feed and "Blutspender/innen gesucht" in feed and "Zukunftsmeldung" not in feed; ok += 1
 
         # Benutzer für Helferin anlegen, als Helferin anmelden und selbst eintragen
         c.req(f"admin.php?m=benutzer&a=neu&mitglied={mid}")

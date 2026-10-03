@@ -7,6 +7,7 @@ $today = date('Y-m-d');
 <div class="cards">
     <?php if (has_role('redaktion')): ?>
         <a class="card stat" href="<?= e(url_admin('seiten')) ?>"><strong><?= (int)val('SELECT COUNT(*) FROM seiten') ?></strong>Seiten</a>
+        <a class="card stat" href="<?= e(url_admin('news')) ?>"><strong><?= (int)val('SELECT COUNT(*) FROM news WHERE datum >= ?', [date('Y-m-d', strtotime('-30 days'))]) ?></strong>Meldungen (30 Tage)</a>
     <?php endif; ?>
     <?php if (has_role('verwaltung')): ?>
         <a class="card stat" href="<?= e(url_admin('mitglieder')) ?>"><strong><?= (int)val("SELECT COUNT(*) FROM mitglieder WHERE status = 'aktiv'") ?></strong>aktive Mitglieder</a>

@@ -180,3 +180,32 @@ a.tile:hover { box-shadow: 0 10px 28px rgba(0,0,0,.1); transform: translateY(-2p
     .topbar, .site-header, .site-footer, .sidebar { display: none; }
     .hero { background: none; color: #000; padding: 0; }
 }
+
+/* Aktuelles */
+.news-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 24px; }
+.news-list { display: flex; flex-direction: column; gap: 0; }
+.news-card { display: flex; flex-direction: column; background: #fff; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.news-list .news-card { flex-direction: row; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 20px 0; gap: 24px; }
+.news-img img { width: 100%; aspect-ratio: 16/9; object-fit: cover; transition: transform .2s; }
+.news-list .news-img { flex: none; width: 220px; }
+.news-list .news-img img { border-radius: var(--radius); }
+.news-card:hover .news-img img { transform: scale(1.02); }
+.news-body { padding: 18px 20px; display: flex; flex-direction: column; flex: 1; }
+.news-list .news-body { padding: 0; }
+.news-body h3 a { color: var(--text); text-decoration: none; }
+.news-body h3 a:hover { color: var(--accent); }
+.news-body p { margin: 0 0 10px; color: var(--muted); }
+.news-body .more { margin-top: auto; font-weight: 600; font-size: .9rem; text-decoration: none; }
+.news-meta { font-size: .85rem; color: var(--muted); margin: 0 0 6px; }
+.news-meta .pin { background: var(--rot); color: #fff; padding: 1px 8px; border-radius: 20px; font-size: .75rem; font-weight: 700; }
+.muted-text { color: var(--muted); }
+.pager { display: flex; gap: 6px; margin-top: 24px; flex-wrap: wrap; }
+.pager a, .pager span { min-width: 40px; padding: 8px 12px; text-align: center; border: 1px solid var(--line); border-radius: var(--radius); text-decoration: none; }
+.pager span { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+.article .lead { font-size: 1.15rem; font-weight: 600; }
+.article-img { margin: 0 0 24px; }
+.article .back { margin-top: 32px; }
+@media (max-width: 860px) {
+    .news-list .news-card { flex-direction: column; gap: 12px; }
+    .news-list .news-img { width: 100%; }
+}

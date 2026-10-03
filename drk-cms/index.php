@@ -7,17 +7,47 @@ if ((int)val('SELECT COUNT(*) FROM benutzer') === 0) {
     redirect('admin.php'); // Ersteinrichtung
 }
 
-$slug = (string)get('seite', home_slug());
 $canPreview = current_user() && has_role('redaktion');
-$page = one('SELECT * FROM seiten WHERE slug = ?' . ($canPreview ? '' : ' AND veroeffentlicht = 1'), [$slug]);
-
-if (!$page) {
+$article = null;
+$parent = null;
+$notFound = function (): array {
     http_response_code(404);
-    $page = ['id' => 0, 'titel' => 'Seite nicht gefunden', 'slug' => '', 'parent_id' => null, 'layout' => 'standard',
+    return ['id' => 0, 'titel' => 'Seite nicht gefunden', 'slug' => '', 'parent_id' => null, 'layout' => 'standard',
         'farbe' => 'rot', 'hero_bild' => null, 'hero_text' => '', 'beschreibung' => '', 'veroeffentlicht' => 1, 'ist_startseite' => 0];
-    $blocks = [['typ' => 'text', 'daten' => json_encode(['inhalt' => "Die angeforderte Seite gibt es leider nicht (mehr).\n\n[Zur Startseite](" . url_page('') . ")"])]];
+};
+$notFoundBlocks = [['typ' => 'text', 'daten' => json_encode(['inhalt' => "Die angeforderte Seite gibt es leider nicht (mehr).\n\n[Zur Startseite](" . url_page('') . ")"])]];
+
+if (get('news') !== null) {
+    /* ---------- Einzelne Meldung ---------- */
+    [$where, $params] = news_public_where();
+    $article = $canPreview
+        ? one('SELECT * FROM news WHERE slug = ?', [(string)get('news')])
+        : one("SELECT * FROM news WHERE slug = ? AND $where", array_merge([(string)get('news')], $params));
+    $blocks = [];
+    if ($article) {
+        $isPublic = (int)$article['veroeffentlicht'] === 1 && $article['datum'] <= date('Y-m-d');
+        $archiveSlug = news_archive_slug();
+        $parent = $archiveSlug ? one('SELECT * FROM seiten WHERE slug = ?', [$archiveSlug]) : null;
+        $page = ['id' => 0, 'titel' => $article['titel'], 'slug' => '', 'parent_id' => $parent['id'] ?? null, 'layout' => 'standard',
+            'farbe' => 'rot', 'hero_bild' => null, 'hero_text' => '', 'beschreibung' => news_teaser($article),
+            'veroeffentlicht' => $isPublic ? 1 : 0, 'ist_startseite' => 0];
+        $editUrl = url_admin('news', 'bearbeiten', ['id' => $article['id']]);
+    } else {
+        $page = $notFound();
+        $blocks = $notFoundBlocks;
+    }
 } else {
-    $blocks = all('SELECT * FROM seiten_bloecke WHERE seite_id = ? ORDER BY sortierung, id', [$page['id']]);
+    /* ---------- Normale Seite ---------- */
+    $slug = (string)get('seite', home_slug());
+    $page = one('SELECT * FROM seiten WHERE slug = ?' . ($canPreview ? '' : ' AND veroeffentlicht = 1'), [$slug]);
+    if (!$page) {
+        $page = $notFound();
+        $blocks = $notFoundBlocks;
+    } else {
+        $blocks = all('SELECT * FROM seiten_bloecke WHERE seite_id = ? ORDER BY sortierung, id', [$page['id']]);
+        $editUrl = url_admin('seiten', 'bearbeiten', ['id' => $page['id']]);
+        $parent = $page['parent_id'] ? one('SELECT * FROM seiten WHERE id = ?', [$page['parent_id']]) : null;
+    }
 }
 
 // Navigation: Hauptseiten mit einer Ebene Unterseiten
@@ -30,8 +60,7 @@ foreach ($menu as $p) {
     }
 }
 
-$parent = $page['parent_id'] ? one('SELECT * FROM seiten WHERE id = ?', [$page['parent_id']]) : null;
 $sectionId = $parent['id'] ?? $page['id'];
-$sidebar = all('SELECT titel, menue_titel, slug FROM seiten WHERE parent_id = ? AND veroeffentlicht = 1 ORDER BY sortierung, titel', [$sectionId]);
+$sidebar = $article ? [] : all('SELECT titel, menue_titel, slug FROM seiten WHERE parent_id = ? AND veroeffentlicht = 1 ORDER BY sortierung, titel', [$sectionId]);
 
 require __DIR__ . '/templates/site.php';
