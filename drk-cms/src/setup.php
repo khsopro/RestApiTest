@@ -34,6 +34,7 @@ function seed_defaults(string $vereinsname): void
 
     $page('Willkommen', 'start', null, 0, [
         ['kacheln', ['titel' => 'Unsere Bereiche', 'eintraege' => "Bereitschaft | Sanitätsdienste, Katastrophenschutz und Betreuung bei Veranstaltungen. | bereitschaft\nJugendrotkreuz | Erste Hilfe lernen, Gemeinschaft erleben und sich für andere einsetzen. | jugendrotkreuz\nBlutspende | Jede Spende kann bis zu drei Leben retten. Hier finden Sie unsere Termine. | blutspende\nMitmachen | Werden Sie aktives Mitglied, Fördermitglied oder unterstützen Sie uns. | mitmachen"]],
+        ['news', ['titel' => 'Aktuelles', 'anzahl' => '3', 'kategorie' => '', 'darstellung' => 'kacheln', 'archiv' => 'nein']],
         ['blutspendetermine', ['titel' => 'Nächste Blutspendetermine', 'anzahl' => '3', 'text' => '[Alle Termine ansehen](blutspende)']],
         ['zahlen', ['titel' => 'Wir in Zahlen', 'eintraege' => "100+ | Mitglieder\n20 | Sanitätsdienste pro Jahr\n6 | Blutspendetermine pro Jahr"]],
         ['unterstuetzer', ['titel' => 'Mit freundlicher Unterstützung von', 'text' => '']],
@@ -55,6 +56,24 @@ function seed_defaults(string $vereinsname): void
     $page('Vorstand', 'vorstand', $about, 3, [
         ['kontakt', ['name' => 'Vorname Nachname', 'funktion' => '1. Vorsitzende/r', 'telefon' => '', 'email' => 'vorstand@drk-musterstadt.de', 'bild' => '', 'text' => '']],
     ], ['layout' => 'seitenleiste', 'beschreibung' => 'Unser Vorstand und Ihre Ansprechpartner.']);
+
+    $page('Aktuelles', 'aktuelles', null, 5, [
+        ['news', ['titel' => '', 'anzahl' => '10', 'kategorie' => '', 'darstellung' => 'liste', 'archiv' => 'ja']],
+    ], ['beschreibung' => 'Neuigkeiten aus unserem Ortsverein.']);
+
+    $news = [
+        ['Neue Sanitätsrucksäcke für die Bereitschaft', 'Bereitschaft', 0, 'Dank einer großzügigen Spende konnten wir zwei neue Sanitätsrucksäcke anschaffen.',
+            "Dank einer großzügigen Spende der örtlichen Sparkasse konnte unsere Bereitschaft zwei neue Sanitätsrucksäcke anschaffen.\n\n## Was ist neu?\n\n- moderne Notfallausrüstung\n- leichteres Gewicht für lange Dienste\n\nHerzlichen Dank an alle Unterstützer!"],
+        ['Blutspender/innen gesucht', 'Blutspende', 1, '',
+            "Die Blutkonserven werden knapp. Bitte kommen Sie zu unserem nächsten Termin – jede Spende zählt!\n\n[Alle Termine ansehen](blutspende)"],
+        ['JRK-Gruppe startet nach den Ferien', 'Jugendrotkreuz', 0, '',
+            "Ab September trifft sich unsere Jugendrotkreuz-Gruppe wieder freitags um 17 Uhr. Neue Mitglieder zwischen 6 und 16 Jahren sind herzlich willkommen."],
+    ];
+    foreach ($news as $i => [$titel, $kat, $pin, $teaser, $inhalt]) {
+        insert('news', ['titel' => $titel, 'slug' => slugify($titel), 'datum' => date('Y-m-d', strtotime('-' . ($i * 9) . ' days')),
+            'kategorie' => $kat, 'teaser' => $teaser, 'inhalt' => $inhalt, 'autor' => 'Redaktion', 'angeheftet' => $pin,
+            'veroeffentlicht' => 1, 'erstellt' => now(), 'aktualisiert' => now()]);
+    }
 
     $page('Blutspende', 'blutspende', null, 20, [
         ['hinweis', ['stil' => 'wichtig', 'inhalt' => "**Blut spenden rettet Leben!** Bitte bringen Sie Ihren Personalausweis und – falls vorhanden – Ihren Blutspendeausweis mit."]],

@@ -11,5 +11,6 @@ Options -Indexes
     RewriteEngine On
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^news/([a-z0-9-]+)/?$ index.php?news=$1 [L,QSA]
     RewriteRule ^([a-z0-9-]+)/?$ index.php?seite=$1 [L,QSA]
 </IfModule>

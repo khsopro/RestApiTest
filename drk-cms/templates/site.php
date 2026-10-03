@@ -6,6 +6,8 @@ $heroUrl = media_url($page['hero_bild'] ? (int)$page['hero_bild'] : null);
 $isHome = (int)$page['ist_startseite'] === 1;
 $layout = $page['layout'] ?: 'standard';
 $activeTop = $parent['id'] ?? $page['id'];
+$article ??= null;
+$basePath = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/')), '/') . '/';
 $footerPages = all('SELECT titel, slug FROM seiten WHERE veroeffentlicht = 1 AND im_menue = 0 AND ist_startseite = 0 AND parent_id IS NULL ORDER BY sortierung');
 ?>
 <!DOCTYPE html>
@@ -13,15 +15,17 @@ $footerPages = all('SELECT titel, slug FROM seiten WHERE veroeffentlicht = 1 AND
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <base href="<?= e($basePath) ?>">
     <title><?= e($isHome ? $siteTitle : $page['titel'] . ' – ' . $siteTitle) ?></title>
     <?php if ($page['beschreibung']): ?><meta name="description" content="<?= e($page['beschreibung']) ?>"><?php endif; ?>
+    <link rel="alternate" type="application/rss+xml" title="Aktuelles – <?= e($siteTitle) ?>" href="feed.php">
     <link rel="stylesheet" href="assets/site.css?v=<?= CMS_VERSION ?>">
 </head>
 <body class="layout-<?= e($layout) ?> accent-<?= e($page['farbe'] ?: 'rot') ?>">
-<a class="skip" href="#inhalt">Zum Inhalt springen</a>
+<a class="skip" href="<?= e(strtok($_SERVER['REQUEST_URI'] ?? '', '#')) ?>#inhalt">Zum Inhalt springen</a>
 
 <?php if ((int)$page['veroeffentlicht'] === 0): ?>
-    <div class="preview-bar">Vorschau – diese Seite ist noch nicht veröffentlicht. <a href="<?= e(url_admin('seiten', 'bearbeiten', ['id' => $page['id']])) ?>">Bearbeiten</a></div>
+    <div class="preview-bar">Vorschau – diese Seite ist noch nicht veröffentlicht. <?php if (!empty($editUrl)): ?><a href="<?= e($editUrl) ?>">Bearbeiten</a><?php endif; ?></div>
 <?php endif; ?>
 
 <div class="topbar">
@@ -91,6 +95,16 @@ $footerPages = all('SELECT titel, slug FROM seiten WHERE veroeffentlicht = 1 AND
         </aside>
     <?php endif; ?>
     <div class="content">
+        <?php if ($article): ?>
+            <article class="article">
+                <p class="news-meta"><time datetime="<?= e($article['datum']) ?>"><?= e(date_de($article['datum'], true)) ?></time>
+                    <?= $article['kategorie'] ? ' · ' . e($article['kategorie']) : '' ?><?= $article['autor'] ? ' · ' . e($article['autor']) : '' ?></p>
+                <?php if ($article['bild']): ?><figure class="figure article-img"><?= render_image((int)$article['bild']) ?></figure><?php endif; ?>
+                <?php if ($article['teaser']): ?><p class="lead"><?= e($article['teaser']) ?></p><?php endif; ?>
+                <div class="prose"><?= md($article['inhalt']) ?></div>
+                <?php if ($parent): ?><p class="back"><a href="<?= e(url_page($parent['slug'])) ?>">← Alle Meldungen</a></p><?php endif; ?>
+            </article>
+        <?php endif; ?>
         <?php foreach ($blocks as $b): $html = render_block($b, $page); if ($html === '') continue; ?>
             <section class="block block-<?= e($b['typ']) ?>"><?= $html ?></section>
         <?php endforeach; ?>

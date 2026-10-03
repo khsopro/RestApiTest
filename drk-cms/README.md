@@ -16,14 +16,16 @@ Ein schlankes Content-Management-System für DRK-Ortsvereine: öffentliche Websi
 | **Seiten & Bereiche** | Hauptseiten bilden die Menüpunkte, Unterseiten erscheinen im Aufklappmenü (z. B. *Über uns › Bereitschaft, Jugendrotkreuz, Vorstand*). |
 | **3 Layouts** | *Standard* (Lesebreite), *Breit* (z. B. Startseite), *Mit Seitenleiste* (Navigation innerhalb eines Bereichs) |
 | **Kopfbild & Akzentfarbe** | pro Seite wählbar |
-| **14 Bausteine** | Text · Bild & Text · Bild · Zwei Spalten · Kacheln · Unterseiten als Kacheln · Hinweisbox · Schaltfläche · Fragen & Antworten · Ansprechpartner/in · Zahlen & Fakten · **Blutspendetermine (automatisch)** · **Unterstützer/Sponsoren (automatisch)** · Adresse/Anfahrt |
+| **15 Bausteine** | Text · Bild & Text · Bild · Zwei Spalten · Kacheln · Unterseiten als Kacheln · Hinweisbox · Schaltfläche · Fragen & Antworten · Ansprechpartner/in · Zahlen & Fakten · **Blutspendetermine (automatisch)** · **Unterstützer/Sponsoren (automatisch)** · **Aktuelles/News (automatisch)** · Adresse/Anfahrt |
 | **Einfache Formatierung** | `## Überschrift`, `**fett**`, `*kursiv*`, `- Liste`, `[Link](https://…)` – kein HTML nötig |
+| **Aktuelles / News** | Meldungen mit Bild, Kurzfassung, Bereich und Autor/in; wichtige Meldungen oben anheften; Veröffentlichung im Voraus planen (erscheint erst ab dem Datum); Archivseite mit Seitenzahlen; Filter nach Bereich (z. B. nur JRK-Meldungen auf der JRK-Seite); RSS-Feed unter `feed.php` |
 | **Entwürfe & Vorschau** | Unveröffentlichte Seiten sind nur für angemeldete Redakteure sichtbar |
 | **Mobilfreundlich** | responsives Layout mit Menü-Schaltfläche |
 
 ### Verwaltung (interner Bereich unter `admin.php`)
 | Modul | Inhalt |
 |---|---|
+| **Aktuelles** | Meldungen schreiben, planen, anheften, als Entwurf speichern, durchsuchen |
 | **Mitglieder** | Stammdaten, Status (aktiv, fördernd, passiv, JRK, ausgetreten), Bereiche, Funktion, Datenschutz-Einwilligung, Filter nach Bereich und Qualifikation, CSV-Export (Excel-tauglich) |
 | **Profile** | Qualifikationen (Sanitäter, Hygienebelehrung …), Verfügbarkeit, „Über mich“. Helfer/innen pflegen ihr Profil unter *Mein Profil* selbst. |
 | **Unterstützer** | Privatpersonen, Firmen, Stiftungen, Art und Höhe der Unterstützung, Logo, optionale Nennung auf der Website |
@@ -42,7 +44,7 @@ Ein schlankes Content-Management-System für DRK-Ortsvereine: öffentliche Websi
 | Rolle | darf |
 |---|---|
 | `admin` | alles, inkl. Benutzer und Einstellungen |
-| `redaktion` | Seiten und Medien |
+| `redaktion` | Seiten, Aktuelles und Medien |
 | `verwaltung` | Mitglieder und Unterstützer |
 | `blutspende` | Termine, Rezepte, Menü, Einkauf, Personaleinteilung |
 | `helfer` | nur eigenes Profil und Selbst-Eintragung in Schichten |
@@ -64,6 +66,9 @@ Ein Benutzer kann mehrere Rollen haben. Wird ein Benutzerkonto mit einem Mitglie
 ### Optional: schöne Adressen
 Wenn der Server `mod_rewrite` unterstützt, in `config.php` `'pretty_urls' => true` setzen. Dann lauten die Adressen `/blutspende` statt `/index.php?seite=blutspende`.
 
+### Update einer bestehenden Installation
+Neue Tabellen (z. B. `news`) werden beim nächsten Aufruf automatisch angelegt. Beispielseiten werden nur bei der Ersteinrichtung erstellt. Für den Newsbereich daher einmalig eine Seite „Aktuelles“ anlegen und den Baustein **Aktuelles / News** mit „Blättern erlauben: Ja“ hinzufügen. Auf der Startseite zeigt ein zweiter News-Baustein (z. B. 3 Kacheln) die neuesten Meldungen.
+
 ### Lokal ausprobieren
 ```bash
 cd drk-cms
@@ -75,7 +80,7 @@ php -S localhost:8000
 ```bash
 python3 tests/smoke_test.py
 ```
-Der Test startet einen eigenen PHP-Server mit leerer Datenbank und prüft Einrichtung, alle Bausteine, Mitglieder, Unterstützer, Rezepte, Einkaufslisten-Berechnung, Personaleinteilung, Selbst-Eintragung, Rollenrechte, CSRF- und XSS-Schutz.
+Der Test startet einen eigenen PHP-Server mit leerer Datenbank und prüft Einrichtung, alle Bausteine, Aktuelles (inkl. Planung, Entwürfe, Archiv, RSS), Mitglieder, Unterstützer, Rezepte, Einkaufslisten-Berechnung, Personaleinteilung, Selbst-Eintragung, Rollenrechte, CSRF- und XSS-Schutz.
 
 ---
 
@@ -105,6 +110,7 @@ Im System umgesetzt:
 drk-cms/
 ├── index.php              Öffentliche Website
 ├── admin.php              Verwaltung (Router, Login, Ersteinrichtung)
+├── feed.php               RSS-Feed „Aktuelles“
 ├── config.sample.php      Beispielkonfiguration
 ├── assets/                CSS und JavaScript
 ├── templates/             HTML-Gerüste für Website und Verwaltung
@@ -116,6 +122,7 @@ drk-cms/
 │   ├── markdown.php       sichere Textformatierung
 │   ├── blocks.php         Seitenbausteine (hier neue Bausteine ergänzen)
 │   ├── blutspende.php     Einkaufslisten-Berechnung, Schichtvorlagen
+│   ├── news.php           Aktuelles: Listen, Kurzfassung, Archiv
 │   ├── setup.php          Startinhalte bei der Ersteinrichtung
 │   └── admin/             ein Modul pro Menüpunkt
 ├── data/                  SQLite-Datenbank (geschützt)

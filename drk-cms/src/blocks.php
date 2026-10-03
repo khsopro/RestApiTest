@@ -70,6 +70,13 @@ function block_types(): array
             ['titel', 'Überschrift', 'text'],
             ['text', 'Einleitung', 'markdown'],
         ]],
+        'news' => ['label' => 'Aktuelles / News (automatisch)', 'icon' => '✎', 'fields' => [
+            ['titel', 'Überschrift', 'text'],
+            ['anzahl', 'Anzahl Meldungen (pro Seite)', 'number'],
+            ['kategorie', 'Nur Meldungen aus Bereich', 'select', ['' => 'alle Bereiche'] + array_combine(area_options(), area_options())],
+            ['darstellung', 'Darstellung', 'select', ['kacheln' => 'Kacheln mit Bild', 'liste' => 'Liste']],
+            ['archiv', 'Blättern erlauben (Archivseite)', 'select', ['nein' => 'Nein – nur die neuesten', 'ja' => 'Ja – mit Seitenzahlen']],
+        ]],
         'karte' => ['label' => 'Adresse / Anfahrt', 'icon' => '⌖', 'fields' => [
             ['titel', 'Überschrift', 'text'],
             ['adresse', 'Adresse', 'markdown'],
@@ -224,6 +231,25 @@ function render_block(array $block, array $page): string
                     : '<div class="sponsor" title="' . e($r['name']) . '">' . $inner . '</div>';
             }
             return $html ? $h2('titel') . '<div class="prose">' . md($t('text')) . '</div><div class="sponsors">' . $html . '</div>' : '';
+
+        case 'news':
+            $limit = max(1, min(50, (int)($d['anzahl'] ?? 3) ?: 3));
+            $archive = $t('archiv') === 'ja';
+            $pageNo = $archive ? max(1, (int)get('p', 1)) : 1;
+            [$items, $total] = news_list($limit, ($pageNo - 1) * $limit, $t('kategorie'));
+            $html = $h2('titel') . render_news_items($items, $t('darstellung'));
+            if ($archive && $total > $limit) {
+                $pages = (int)ceil($total / $limit);
+                $html .= '<nav class="pager" aria-label="Seiten">';
+                for ($i = 1; $i <= $pages; $i++) {
+                    $html .= $i === $pageNo ? '<span aria-current="page">' . $i . '</span>'
+                        : '<a href="' . e(url_with(url_page($page['slug']), ['p' => $i > 1 ? $i : null])) . '">' . $i . '</a>';
+                }
+                $html .= '</nav>';
+            } elseif (!$archive && $items && ($arch = news_archive_slug()) && $arch !== ($page['slug'] ?? '')) {
+                $html .= '<p class="btn-row"><a class="btn btn-outline" href="' . e(url_page($arch)) . '">Alle Meldungen</a></p>';
+            }
+            return $html;
 
         case 'karte':
             $link = resolve_link($t('link'));

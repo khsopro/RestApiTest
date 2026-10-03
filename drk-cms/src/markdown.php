@@ -47,9 +47,9 @@ function md_inline(string $s): string
 {
     $s = e($s);
     $s = preg_replace_callback('/\[([^\]]+)\]\(([^)\s]+)\)/', function ($m) {
-        $url = html_entity_decode($m[2], ENT_QUOTES, 'UTF-8');
-        // Nur sichere Ziele zulassen (kein javascript: o. ä.)
-        if (!preg_match('~^(https?://|mailto:|tel:)~i', $url) && str_contains($url, ':')) {
+        // Seitenkürzel auflösen, nur sichere Ziele zulassen (kein javascript: o. ä.)
+        $url = resolve_link(html_entity_decode($m[2], ENT_QUOTES, 'UTF-8'));
+        if ($url === '') {
             return $m[1];
         }
         $ext = preg_match('~^https?://~i', $url) ? ' target="_blank" rel="noopener"' : '';
