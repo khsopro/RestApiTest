@@ -13,8 +13,16 @@ $fields = [
     ['qualifikation', 'Erforderliche Qualifikation', 'select', ['options' => array_merge([''], qualification_options())]],
     ['ansprechpartner', 'Ansprechpartner/in', 'text'],
     ['hinweise', 'Wichtige Hinweise (Sicherheit, Hygiene, Kleidung)', 'textarea', ['rows' => 4, 'wide' => true]],
-    ['sortierung', 'Reihenfolge', 'number'],
+    ['sortierung', 'Reihenfolge', 'number', ['help' => 'Kleinere Zahl = weiter vorne (auch in der Einweisungsmappe)']],
 ];
+$fieldsStd = [
+    ['standard', 'Bei neuen Blutspendeterminen automatisch als Schicht anlegen', 'checkbox', ['wide' => true]],
+    ['std_von', 'von', 'text', ['help' => 'Uhrzeit (z. B. 13:30) oder „beginn“ / „ende“ des Termins']],
+    ['std_bis', 'bis', 'text', ['help' => 'Uhrzeit oder „beginn“ / „ende“']],
+    ['std_anzahl', 'Anzahl Personen', 'number'],
+];
+$tab = get('archiv') ? 'archiv' : 'aktiv';
+$backToList = fn(bool $archiv = false) => url_admin('stellen', '', $archiv ? ['archiv' => 1] : []);
 
 /* ---------- Aktionen (nur Blutspende-Team) ---------- */
 if (is_post()) {
@@ -23,8 +31,13 @@ if (is_post()) {
         exit('Keine Berechtigung.');
     }
     if ($a === 'speichern') {
-        $data = form_collect($fields);
+        $data = form_collect(array_merge($fields, $fieldsStd));
         $data['sortierung'] = (int)$data['sortierung'];
+        $data['std_anzahl'] = max(1, (int)$data['std_anzahl']);
+        foreach (['std_von', 'std_bis'] as $k) {
+            $v = mb_strtolower(trim((string)$data[$k]));
+            $data[$k] = in_array($v, ['beginn', 'ende'], true) || preg_match('/^\d{1,2}:\d{2}$/', $v) ? $v : '';
+        }
         if ($data['titel'] === '') {
             flash('Bitte eine Bezeichnung angeben.', 'error');
             redirect(url_admin('stellen', $id ? 'bearbeiten' : 'neu', $id ? ['id' => $id] : []));
@@ -48,8 +61,35 @@ if (is_post()) {
         $titel = (string)val('SELECT titel FROM bs_stellen WHERE id = ?', [$id]);
         q('DELETE FROM bs_stellen WHERE id = ?', [$id]);
         audit('Stellenbeschreibung gelöscht', $titel);
-        flash('Stellenbeschreibung gelöscht.');
-        redirect(url_admin('stellen'));
+        flash('Stellenbeschreibung „' . $titel . '“ gelöscht.');
+        redirect($backToList((bool)post('archiv')));
+    }
+    if (in_array($a, ['archivieren', 'wiederherstellen'], true) && $id) {
+        $titel = (string)val('SELECT titel FROM bs_stellen WHERE id = ?', [$id]);
+        update('bs_stellen', ['archiviert' => $a === 'archivieren' ? 1 : 0, 'aktualisiert' => now()], $id);
+        audit('Stellenbeschreibung ' . ($a === 'archivieren' ? 'archiviert' : 'wiederhergestellt'), $titel);
+        flash('„' . $titel . '“ ' . ($a === 'archivieren'
+            ? 'archiviert. Sie wird nicht mehr verlinkt und nicht mehr als Standard-Schicht angelegt.'
+            : 'wiederhergestellt.'));
+        redirect($backToList($a === 'wiederherstellen'));
+    }
+    if ($a === 'kopieren' && $id) {
+        $row = one('SELECT * FROM bs_stellen WHERE id = ?', [$id]);
+        if ($row) {
+            unset($row['id']);
+            $base = $row['titel'] . ' (Kopie)';
+            $row['titel'] = $base;
+            for ($n = 2; isset(job_ids()[mb_strtolower($row['titel'])]) || val('SELECT id FROM bs_stellen WHERE titel = ?', [$row['titel']]); $n++) {
+                $row['titel'] = $base . ' ' . $n;
+            }
+            $row['standard'] = 0;
+            $row['archiviert'] = 0;
+            $row['aktualisiert'] = now();
+            $new = insert('bs_stellen', $row);
+            flash('Kopie angelegt – bitte Bezeichnung anpassen.');
+            redirect(url_admin('stellen', 'bearbeiten', ['id' => $new]));
+        }
+        redirect($backToList());
     }
     if ($a === 'vorlagen') {
         $n = seed_job_descriptions();
@@ -99,7 +139,7 @@ function render_job(array $s): string
 
 /* ---------- Druck (einzeln oder alle als Einweisungsmappe) ---------- */
 if ($a === 'druck') {
-    $rows = $id ? all('SELECT * FROM bs_stellen WHERE id = ?', [$id]) : all('SELECT * FROM bs_stellen ORDER BY sortierung, titel');
+    $rows = $id ? all('SELECT * FROM bs_stellen WHERE id = ?', [$id]) : all('SELECT * FROM bs_stellen WHERE archiviert = 0 ORDER BY sortierung, titel');
     $printView = true;
     $title = $id && $rows ? 'Stellenbeschreibung ' . $rows[0]['titel'] : 'Einweisungsmappe Blutspende';
     echo '<div class="print-page">';
@@ -116,7 +156,7 @@ if ($a === 'druck') {
 /* ---------- Ansehen ---------- */
 if ($a === 'ansehen' && $id) {
     $s = one('SELECT * FROM bs_stellen WHERE id = ?', [$id]);
-    if (!$s) {
+    if (!$s || ((int)$s['archiviert'] === 1 && !$canEdit)) {
         redirect(url_admin('stellen'));
     }
     $title = $s['titel'];
@@ -129,12 +169,15 @@ if ($a === 'ansehen' && $id) {
     <p class="crumbs"><a href="<?= e(url_admin(has_role('blutspende') ? 'blutspende' : 'profil')) ?>"><?= has_role('blutspende') ? 'Blutspende' : 'Mein Profil' ?></a> ›
         <a href="<?= e(url_admin('stellen')) ?>">Stellenbeschreibungen</a> › <?= e($s['titel']) ?></p>
     <div class="head-row">
-        <h1><?= e($s['titel']) ?></h1>
-        <div>
+        <h1><?= e($s['titel']) ?><?= (int)$s['archiviert'] ? ' <span class="badge">archiviert</span>' : '' ?></h1>
+        <div class="btn-group">
             <a class="btn btn-outline" href="<?= e(url_admin('stellen', 'druck', ['id' => $id])) ?>" target="_blank">Drucken</a>
-            <?php if ($canEdit): ?><a class="btn" href="<?= e(url_admin('stellen', 'bearbeiten', ['id' => $id])) ?>">Bearbeiten</a><?php endif; ?>
+            <?php if ($canEdit): ?><?= job_actions($s) ?><?php endif; ?>
         </div>
     </div>
+    <?php if ((int)$s['standard'] && !(int)$s['archiviert']): ?>
+        <p class="muted">Wird bei neuen Terminen automatisch als Schicht angelegt: <?= e(std_time_label((string)$s['std_von'])) ?>–<?= e(std_time_label((string)$s['std_bis'])) ?>, <?= (int)$s['std_anzahl'] ?> Person(en).</p>
+    <?php endif; ?>
     <div class="grid-2 job-layout">
         <section class="panel job"><?= render_job($s) ?></section>
         <section class="panel">
@@ -160,7 +203,7 @@ if ($a === 'ansehen' && $id) {
 
 /* ---------- Anlegen / Bearbeiten ---------- */
 if (($a === 'neu' || $a === 'bearbeiten') && $canEdit) {
-    $row = $id ? one('SELECT * FROM bs_stellen WHERE id = ?', [$id]) : ['sortierung' => 100];
+    $row = $id ? one('SELECT * FROM bs_stellen WHERE id = ?', [$id]) : ['sortierung' => 100, 'std_von' => 'beginn', 'std_bis' => 'ende', 'std_anzahl' => 1];
     if (!$row) {
         redirect(url_admin('stellen'));
     }
@@ -171,55 +214,97 @@ if (($a === 'neu' || $a === 'bearbeiten') && $canEdit) {
     <form method="post" action="<?= e(url_admin('stellen', 'speichern', $id ? ['id' => $id] : [])) ?>">
         <?= csrf_field() ?>
         <section class="panel"><div class="form-grid"><?= form_fields($fields, $row) ?></div></section>
+        <section class="panel">
+            <h2>Standard-Schicht</h2>
+            <p class="muted small">Ist das Häkchen gesetzt, wird diese Aufgabe beim Anlegen eines neuen Blutspendetermins automatisch als Schicht eingeplant.</p>
+            <div class="form-grid"><?= form_fields($fieldsStd, $row) ?></div>
+        </section>
         <div class="actions sticky-actions"><button class="btn">Speichern</button>
             <a href="<?= e($id ? url_admin('stellen', 'ansehen', ['id' => $id]) : url_admin('stellen')) ?>">Abbrechen</a></div>
     </form>
     <?php if ($id): ?>
-        <form method="post" action="<?= e(url_admin('stellen', 'loeschen', ['id' => $id])) ?>" class="danger-zone" data-confirm="Stellenbeschreibung „<?= e($row['titel']) ?>“ löschen? Schichten bleiben erhalten.">
-            <?= csrf_field() ?><button class="btn btn-danger">Löschen</button>
-        </form>
+        <div class="danger-zone btn-group"><?= job_actions($row, false) ?></div>
     <?php endif;
     return;
 }
 
 /* ---------- Übersicht ---------- */
-$rows = all('SELECT * FROM bs_stellen ORDER BY sortierung, titel');
+$archivCount = (int)val('SELECT COUNT(*) FROM bs_stellen WHERE archiviert = 1');
+if ($tab === 'archiv' && !$canEdit) {
+    $tab = 'aktiv';
+}
+$rows = all('SELECT * FROM bs_stellen WHERE archiviert = ? ORDER BY sortierung, titel', [$tab === 'archiv' ? 1 : 0]);
 $planned = [];
 foreach (all('SELECT s.aufgabe FROM bs_schichten s JOIN bs_termine t ON t.id = s.termin_id WHERE t.datum >= ?', [date('Y-m-d')]) as $r) {
     $key = mb_strtolower(trim($r['aufgabe']));
     $planned[$key] = ($planned[$key] ?? 0) + 1;
 }
-foreach ($rows as &$r) {
-    $r['geplant'] = $planned[mb_strtolower(trim($r['titel']))] ?? 0;
-}
-unset($r);
 $title = 'Stellenbeschreibungen';
 ?>
 <p class="crumbs"><a href="<?= e(url_admin(has_role('blutspende') ? 'blutspende' : 'profil')) ?>"><?= has_role('blutspende') ? 'Blutspende' : 'Mein Profil' ?></a> › Stellenbeschreibungen</p>
 <div class="head-row">
-    <h1>Stellenbeschreibungen <small class="muted">(<?= count($rows) ?>)</small></h1>
-    <div>
-        <?php if ($rows): ?><a class="btn btn-outline" href="<?= e(url_admin('stellen', 'druck')) ?>" target="_blank">Einweisungsmappe drucken</a><?php endif; ?>
-        <?php if ($canEdit): ?><a class="btn" href="<?= e(url_admin('stellen', 'neu')) ?>">+ Neue Stellenbeschreibung</a><?php endif; ?>
+    <h1>Stellenbeschreibungen</h1>
+    <div class="btn-group">
+        <a class="btn btn-outline" href="<?= e(url_admin('stellen', 'druck')) ?>" target="_blank">Einweisungsmappe drucken</a>
+        <?php if ($canEdit): ?><a class="btn" href="<?= e(url_admin('stellen', 'neu')) ?>">+ Neue Aufgabe</a><?php endif; ?>
     </div>
 </div>
 <p class="muted">Was ist bei welcher Aufgabe zu tun? Die Beschreibungen sind in der Personaleinteilung und bei der Selbst-Eintragung mit ⓘ verlinkt.</p>
-<?php if (!$rows): ?>
+<?php if ($canEdit): ?>
+    <nav class="tabs">
+        <a href="<?= e($backToList()) ?>" class="<?= $tab === 'aktiv' ? 'active' : '' ?>">Aktiv</a>
+        <a href="<?= e($backToList(true)) ?>" class="<?= $tab === 'archiv' ? 'active' : '' ?>">Archiv (<?= $archivCount ?>)</a>
+    </nav>
+<?php endif; ?>
+<?php if (!$rows && $tab === 'aktiv'): ?>
     <div class="panel">
-        <p>Noch keine Stellenbeschreibungen vorhanden.</p>
+        <p>Noch keine aktiven Stellenbeschreibungen.</p>
         <?php if ($canEdit): ?><?= post_button(url_admin('stellen', 'vorlagen'), 'Vorlagen für die Standard-Aufgaben anlegen', [], '', false, '', 'btn') ?><?php endif; ?>
     </div>
+<?php elseif (!$rows): ?>
+    <p class="muted">Das Archiv ist leer. Archivierte Aufgaben bleiben erhalten, werden aber nicht mehr verlinkt und nicht mehr automatisch eingeplant.</p>
 <?php endif; ?>
 <div class="profile-grid">
-    <?php foreach ($rows as $s): ?>
-        <a class="profile-card job-card" href="<?= e(url_admin('stellen', 'ansehen', ['id' => $s['id']])) ?>">
-            <h3><?= e($s['titel']) ?></h3>
+    <?php foreach ($rows as $s): $geplant = $planned[mb_strtolower(trim($s['titel']))] ?? 0; ?>
+        <article class="profile-card job-card<?= (int)$s['archiviert'] ? ' archived' : '' ?>">
+            <h3><a href="<?= e(url_admin('stellen', 'ansehen', ['id' => $s['id']])) ?>"><?= e($s['titel']) ?></a></h3>
             <?php if ($s['kurz']): ?><p class="muted"><?= e($s['kurz']) ?></p><?php endif; ?>
-            <?= $s['qualifikation'] ? '<div class="tags"><span class="tag">' . e($s['qualifikation']) . '</span></div>' : '' ?>
+            <div class="tags">
+                <?= $s['qualifikation'] ? '<span class="tag">' . e($s['qualifikation']) . '</span>' : '' ?>
+                <?= (int)$s['standard'] ? '<span class="tag tag-grey" title="wird bei neuen Terminen automatisch eingeplant">Standard-Schicht · ' . (int)$s['std_anzahl'] . ' Pers.</span>' : '' ?>
+            </div>
             <div class="profile-stats">
                 <?php if ($s['zeitaufwand']): ?><span><?= e($s['zeitaufwand']) ?></span><?php endif; ?>
-                <span><strong><?= (int)$s['geplant'] ?></strong> geplante Schichten</span>
+                <span><strong><?= $geplant ?></strong> geplante Schichten</span>
             </div>
-        </a>
+            <?php if ($canEdit): ?><div class="card-actions"><?= job_actions($s) ?></div><?php endif; ?>
+        </article>
     <?php endforeach; ?>
 </div>
+<?php
+/** Bearbeiten / Kopieren / Archivieren bzw. Wiederherstellen / Löschen */
+function job_actions(array $s, bool $withEdit = true): string
+{
+    $id = (int)$s['id'];
+    $archived = (int)$s['archiviert'] === 1;
+    $html = $withEdit && !$archived ? '<a class="btn btn-small" href="' . e(url_admin('stellen', 'bearbeiten', ['id' => $id])) . '">Bearbeiten</a>' : '';
+    if (!$archived) {
+        $html .= post_button(url_admin('stellen', 'kopieren', ['id' => $id]), 'Kopieren', [], 'Als Vorlage für eine neue Aufgabe kopieren');
+        $html .= post_button(url_admin('stellen', 'archivieren', ['id' => $id]), 'Archivieren', [], 'Ausblenden, aber aufbewahren', false,
+            'Aufgabe „' . $s['titel'] . '“ archivieren? Sie wird nicht mehr verlinkt und nicht mehr automatisch eingeplant.');
+    } else {
+        $html .= post_button(url_admin('stellen', 'wiederherstellen', ['id' => $id]), 'Wiederherstellen', [], '', false, '', 'btn btn-small');
+    }
+    return $html . post_button(url_admin('stellen', 'loeschen', ['id' => $id]), 'Löschen', ['archiv' => $archived ? 1 : ''], 'Endgültig löschen', false,
+        'Aufgabe „' . $s['titel'] . '“ endgültig löschen? Bereits geplante Schichten bleiben erhalten.', 'btn btn-small btn-danger');
+}
+
+/** „beginn“/„ende“ lesbar machen */
+function std_time_label(string $v): string
+{
+    return match ($v) {
+        'beginn' => 'Terminbeginn',
+        'ende'   => 'Terminende',
+        default  => $v,
+    };
+}

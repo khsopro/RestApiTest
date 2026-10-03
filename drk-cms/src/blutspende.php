@@ -95,6 +95,20 @@ function default_shifts(?string $beginn, ?string $ende): array
         };
     };
     $out = [];
+    // Vorrang: Aufgaben, die in den Stellenbeschreibungen als Standard-Schicht markiert sind
+    foreach (all('SELECT * FROM bs_stellen WHERE standard = 1 AND archiviert = 0 ORDER BY sortierung, titel') as $s) {
+        $out[] = [
+            'aufgabe'       => $s['titel'],
+            'von'           => $time((string)$s['std_von'], $beginn),
+            'bis'           => $time((string)$s['std_bis'], $ende),
+            'benoetigt'     => max(1, (int)$s['std_anzahl']),
+            'qualifikation' => (string)$s['qualifikation'],
+        ];
+    }
+    if ($out) {
+        return $out;
+    }
+    // Rückfall: Textvorlage aus den Einstellungen
     foreach (setting_lines('bs_standard_schichten') as $line) {
         $p = array_pad(array_map('trim', explode('|', $line)), 5, '');
         $out[] = [
@@ -199,7 +213,7 @@ function job_ids(): array
     static $map = null;
     if ($map === null) {
         $map = [];
-        foreach (all('SELECT id, titel FROM bs_stellen') as $r) {
+        foreach (all('SELECT id, titel FROM bs_stellen WHERE archiviert = 0') as $r) {
             $map[mb_strtolower(trim($r['titel']))] = (int)$r['id'];
         }
     }
@@ -248,14 +262,33 @@ function seed_job_descriptions(): int
             "Material des Blutspendedienstes übergeben\nMöbel zurückstellen\nMüll entsorgen\nFenster schließen, Licht aus, abschließen\nSchlüssel zurückgeben",
             "Körperlich belastbar.", '', 'ca. 1,5 Stunden nach Ende', "Feste Schuhe tragen."],
     ];
+    // Standard-Schicht je Aufgabe: [von, bis, Anzahl]
+    $std = [
+        'Aufbau' => ['13:30', 'beginn', 4], 'Anmeldung' => ['beginn', 'ende', 2], 'Arztzimmer/Labor-Unterstützung' => ['beginn', 'ende', 1],
+        'Ruheraum/Betreuung' => ['beginn', 'ende', 2], 'Küche' => ['13:00', 'ende', 3], 'Imbiss-Ausgabe' => ['beginn', 'ende', 2],
+        'Abbau' => ['ende', '21:00', 4],
+    ];
     $n = 0;
     foreach ($jobs as $i => [$titel, $kurz, $aufgaben, $ablauf, $anf, $quali, $zeit, $hinweise]) {
         if (val('SELECT id FROM bs_stellen WHERE titel = ?', [$titel])) {
             continue;
         }
         insert('bs_stellen', ['titel' => $titel, 'kurz' => $kurz, 'aufgaben' => $aufgaben, 'ablauf' => $ablauf, 'anforderungen' => $anf,
-            'qualifikation' => $quali, 'zeitaufwand' => $zeit, 'hinweise' => $hinweise, 'ansprechpartner' => '', 'sortierung' => $i * 10, 'aktualisiert' => now()]);
+            'qualifikation' => $quali, 'zeitaufwand' => $zeit, 'hinweise' => $hinweise, 'ansprechpartner' => '', 'sortierung' => $i * 10,
+            'standard' => 1, 'std_von' => $std[$titel][0], 'std_bis' => $std[$titel][1], 'std_anzahl' => $std[$titel][2],
+            'archiviert' => 0, 'aktualisiert' => now()]);
         $n++;
     }
     return $n;
+}
+
+/** Bereich in einer kommagetrennten Liste ergänzen oder entfernen */
+function areas_with(?string $csv, string $area, bool $add = true): string
+{
+    $list = array_values(array_filter(array_map('trim', explode(',', (string)$csv))));
+    $list = array_values(array_filter($list, fn($a) => $a !== $area));
+    if ($add) {
+        $list[] = $area;
+    }
+    return implode(', ', $list);
 }

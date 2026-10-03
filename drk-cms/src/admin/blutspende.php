@@ -325,7 +325,7 @@ if ($a === 'termin') {
         </section>
     <?php elseif ($tab === 'personal'):
         $shifts = all('SELECT * FROM bs_schichten WHERE termin_id = ? ORDER BY von, aufgabe', [$id]);
-        $members = all("SELECT id, vorname, nachname, qualifikationen, bereiche FROM mitglieder WHERE status NOT IN ('ausgetreten', 'foerdernd') ORDER BY nachname, vorname");
+        $members = all("SELECT id, vorname, nachname, qualifikationen, bereiche FROM mitglieder WHERE status NOT IN ('ausgetreten', 'foerdernd') AND bs_archiviert = 0 ORDER BY nachname, vorname");
         $assigned = [];
         foreach (all('SELECT e.*, s.von, s.bis, s.aufgabe, m.vorname, m.nachname, m.mobil, m.telefon, m.qualifikationen FROM bs_einteilung e
             JOIN bs_schichten s ON s.id = e.schicht_id JOIN mitglieder m ON m.id = e.mitglied_id WHERE s.termin_id = ? ORDER BY m.nachname', [$id]) as $e) {
@@ -414,7 +414,7 @@ if ($a === 'termin') {
                 </section>
             <?php endforeach; ?>
         </div>
-        <datalist id="stellen"><?php foreach (all('SELECT titel FROM bs_stellen ORDER BY sortierung, titel') as $st): ?><option value="<?= e($st['titel']) ?>"><?php endforeach; ?></datalist>
+        <datalist id="stellen"><?php foreach (all('SELECT titel FROM bs_stellen WHERE archiviert = 0 ORDER BY sortierung, titel') as $st): ?><option value="<?= e($st['titel']) ?>"><?php endforeach; ?></datalist>
         <form method="post" action="<?= e(url_admin('blutspende', 'schicht_add', ['id' => $id])) ?>" class="panel">
             <?= csrf_field() ?>
             <h3>Weitere Schicht / Aufgabe</h3>

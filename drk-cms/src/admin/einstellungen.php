@@ -12,7 +12,7 @@ $fields = [
     ['rezept_kategorien', 'Rezept-Kategorien (eine pro Zeile)', 'textarea', ['rows' => 6]],
     ['einkauf_abteilungen', 'Abteilungen der Einkaufsliste (eine pro Zeile)', 'textarea', ['rows' => 6]],
     ['bs_standard_schichten', 'Standard-Schichten Blutspende', 'textarea', ['rows' => 8, 'wide' => true,
-        'help' => 'Eine Schicht pro Zeile: Aufgabe | von | bis | Anzahl | Qualifikation.  „beginn“ und „ende“ werden durch die Uhrzeiten des Termins ersetzt.']],
+        'help' => 'Nur noch Rückfall: Sobald eine Stellenbeschreibung als Standard-Schicht markiert ist (Blutspende › Stellenbeschreibungen), werden diese verwendet. Format: Aufgabe | von | bis | Anzahl | Qualifikation.']],
 ];
 
 if (is_post()) {

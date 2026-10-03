@@ -231,7 +231,7 @@ def main():
         # Stellenbeschreibungen (Blutspende)
         html = c.req("admin.php?m=stellen")
         assert html.count('class="profile-card job-card"') == 7, "7 Vorlagen bei der Einrichtung"
-        kid = re.search(r'a=ansehen&amp;id=(\d+)">\s*<h3>Küche', html).group(1)
+        kid = re.search(r'a=ansehen&amp;id=(\d+)">Küche', html).group(1)
         html = c.req(f"admin.php?m=stellen&a=ansehen&id={kid}")
         assert "Hygienebelehrung (§ 43 IfSG)" in html and 'class="job-checklist"' in html and "Gemeindehaus" in html
         html = c.req(f"admin.php?m=blutspende&a=termin&id={tid}&tab=personal")
@@ -249,6 +249,62 @@ def main():
         c.post(f"admin.php?m=stellen&a=loeschen&id={kid}", {})
         assert "1 Vorlagen angelegt" in c.post("admin.php?m=stellen&a=vorlagen", {}); ok += 1
 
+        # Aufgaben verwalten: archivieren, wiederherstellen, kopieren, Standard-Schicht
+        html = c.req("admin.php?m=stellen")
+        assert "Archiv (0)" in html and 'class="card-actions"' in html
+        kid = re.search(r'a=ansehen&amp;id=(\d+)">Küche', html).group(1)
+        html = c.post(f"admin.php?m=stellen&a=archivieren&id={kid}", {})
+        assert "archiviert" in html and ">Küche</a>" not in html and "Archiv (1)" in html
+        assert ">Küche</a>" in c.req("admin.php?m=stellen&archiv=1")
+        html = c.req(f"admin.php?m=blutspende&a=termin&id={tid}&tab=personal")
+        assert f"a=ansehen&amp;id={kid}" not in html and '<option value="Küche">' not in html, "archivierte Aufgabe nicht mehr verlinkt"
+        c.req("admin.php?m=stellen&a=neu")
+        c.post("admin.php?m=stellen&a=speichern", {"titel": "Getränkestand", "standard": "1", "std_von": "beginn", "std_bis": "18:00", "std_anzahl": "2", "sortierung": "55"})
+        c.req("admin.php?m=blutspende&a=neu")
+        html = c.post("admin.php?m=blutspende&a=speichern", {"datum": "2099-06-01", "beginn": "15:00", "ende": "19:00", "ort": "Turnhalle", "standard_schichten": "1"})
+        t2 = re.search(r'a=termin&amp;id=(\d+)', html).group(1)
+        html = c.req(f"admin.php?m=blutspende&a=termin&id={t2}&tab=personal")
+        assert "Getränkestand" in html and "15:00–18:00" in html, "neue Aufgabe als Standard-Schicht"
+        assert "<h3>Küche" not in html, "archivierte Aufgabe nicht automatisch eingeplant"
+        html = c.post(f"admin.php?m=stellen&a=wiederherstellen&id={kid}", {})
+        assert "wiederhergestellt" in html
+        html = c.post(f"admin.php?m=stellen&a=kopieren&id={kid}", {})
+        assert 'value="Küche (Kopie)"' in html, "Kopie öffnet sich zum Bearbeiten"; ok += 1
+
+        # Helfer-Profile verwalten: aufnehmen, neu, bearbeiten, archivieren, löschen
+        html = c.req("admin.php?m=helferprofile&a=neu")
+        assert "Schon Mitglied im Verein?" in html and "Beispiel, =Bernd" in html
+        bid = re.search(r'<option value="(\d+)">Beispiel, =Bernd', html).group(1)
+        assert "=Bernd Beispiel" in c.post("admin.php?m=helferprofile&a=aufnehmen", {"mitglied_id": bid})
+        assert "=Bernd Beispiel" in c.req("admin.php?m=helferprofile")
+        c.req("admin.php?m=helferprofile&a=neu")
+        html = c.post("admin.php?m=helferprofile&a=speichern", {"vorname": "Lena", "nachname": "Neu", "mobil": "0151 111",
+                                                                 "qualifikationen[]": ["Erste-Hilfe-Kurs"], "verfuegbarkeit": "abends"})
+        lid = re.search(r'm=helferprofile&amp;a=bearbeiten&amp;id=(\d+)', html).group(1)
+        assert "Lena Neu" in html and "abends" in html
+        c.req(f"admin.php?m=helferprofile&a=bearbeiten&id={lid}")
+        assert "nur sonntags" in c.post(f"admin.php?m=helferprofile&a=speichern&id={lid}", {"vorname": "Lena", "nachname": "Neu", "verfuegbarkeit": "nur sonntags"})
+        assert "Blutspende" in c.req(f"admin.php?m=mitglieder&a=bearbeiten&id={lid}"), "neues Profil = Mitglied mit Bereich Blutspende"
+        html = c.post(f"admin.php?m=helferprofile&a=archivieren&id={mid}", {})
+        assert "archiviert" in html and "Anna Muster" not in html.split('class="profile-grid"')[1]
+        assert "Anna Muster" in c.req("admin.php?m=helferprofile&archiv=1")
+        html = c.req(f"admin.php?m=blutspende&a=termin&id={t2}&tab=personal")
+        assert f'<option value="{mid}">' not in html, "archivierte Helferin nicht mehr einteilbar"
+        assert "ist wieder im Blutspende-Team" in c.post(f"admin.php?m=helferprofile&a=wiederherstellen&id={mid}", {})
+        # Nur-Blutspende-Benutzer: archivieren ja, löschen nein
+        c.req("admin.php?m=benutzer&a=neu")
+        c.post("admin.php?m=benutzer&a=speichern", {"benutzername": "bsteam", "passwort": "blutspende123", "rollen[]": ["blutspende"], "aktiv": "1"})
+        bs = Client()
+        bs.req("admin.php?m=login")
+        bs.post("admin.php?m=login", {"benutzername": "bsteam", "passwort": "blutspende123"})
+        html = bs.req("admin.php?m=helferprofile")
+        assert "Archivieren" in html and "Bearbeiten" in html and ">Löschen<" not in html
+        bs.post(f"admin.php?m=helferprofile&a=loeschen&id={lid}", {}, expect=403)
+        html = c.req("admin.php?m=helferprofile")
+        assert ">Löschen<" in html
+        c.post(f"admin.php?m=helferprofile&a=loeschen&id={lid}", {})
+        assert "Lena Neu" not in c.req("admin.php?m=helferprofile&alle=1"); ok += 1
+
         # Benutzer für Helferin anlegen, als Helferin anmelden und selbst eintragen
         c.req(f"admin.php?m=benutzer&a=neu&mitglied={mid}")
         c.post("admin.php?m=benutzer&a=speichern", {"benutzername": "anna", "name": "Anna Muster", "passwort": "helferin12345",
@@ -265,7 +321,7 @@ def main():
         assert "Du bist dabei" in html and "m=stellen&amp;a=ansehen" in html, "Selbst-Eintragung verlinkt Stellenbeschreibungen"
         html = h.req("admin.php?m=stellen")
         assert "Küche" in html and "Neue Stellenbeschreibung" not in html, "Helfer/innen dürfen nur lesen"
-        sid_k = re.search(r'a=ansehen&amp;id=(\d+)">\s*<h3>Anmeldung', html).group(1)
+        sid_k = re.search(r'a=ansehen&amp;id=(\d+)">Anmeldung', html).group(1)
         assert "Bearbeiten" not in h.req(f"admin.php?m=stellen&a=ansehen&id={sid_k}")
         h.post(f"admin.php?m=stellen&a=speichern&id={sid_k}", {"titel": "gehackt"}, expect=403)
         h.req("admin.php?m=mitglieder", expect=403)

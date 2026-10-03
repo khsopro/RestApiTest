@@ -262,3 +262,10 @@ body.bare { display: grid; place-items: center; min-height: 100vh; padding: 20px
 .job-print { break-after: page; }
 .job-print:last-child { break-after: auto; }
 @media (max-width: 900px) { .job-layout { grid-template-columns: 1fr; } }
+
+.btn-group { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.card-actions { display: flex; gap: 6px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 10px; }
+.job-card h3 a { color: var(--text); text-decoration: none; }
+.job-card h3 a:hover { color: var(--rot); }
+.profile-card.archived { opacity: .75; border-top-color: #9aa0a6; background: #fafbfc; }
+.tag-grey { background: #eceef1; color: #3b4148; }

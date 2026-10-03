@@ -103,6 +103,7 @@ function migrate(PDO $pdo): void
             verfuegbarkeit TEXT,
             profil_text TEXT,
             foto $ref NULL,
+            bs_archiviert INTEGER NOT NULL DEFAULT 0,
             datenschutz_einwilligung VARCHAR(10),
             notizen TEXT,
             erstellt VARCHAR(20),
@@ -208,6 +209,11 @@ function migrate(PDO $pdo): void
             zeitaufwand VARCHAR(100),
             hinweise TEXT,
             ansprechpartner VARCHAR(200),
+            standard INTEGER NOT NULL DEFAULT 0,
+            std_von VARCHAR(10),
+            std_bis VARCHAR(10),
+            std_anzahl INTEGER NOT NULL DEFAULT 1,
+            archiviert INTEGER NOT NULL DEFAULT 0,
             sortierung INTEGER NOT NULL DEFAULT 0,
             aktualisiert VARCHAR(20)",
 
@@ -225,6 +231,12 @@ function migrate(PDO $pdo): void
     // Spalten, die nach Version 1.0 hinzugekommen sind (für bestehende Installationen)
     $added = [
         ['mitglieder', 'foto', "$ref NULL"],
+        ['mitglieder', 'bs_archiviert', 'INTEGER NOT NULL DEFAULT 0'],
+        ['bs_stellen', 'standard', 'INTEGER NOT NULL DEFAULT 0'],
+        ['bs_stellen', 'std_von', 'VARCHAR(10)'],
+        ['bs_stellen', 'std_bis', 'VARCHAR(10)'],
+        ['bs_stellen', 'std_anzahl', 'INTEGER NOT NULL DEFAULT 1'],
+        ['bs_stellen', 'archiviert', 'INTEGER NOT NULL DEFAULT 0'],
     ];
     foreach ($added as [$table, $column, $definition]) {
         $existing = $sqlite
