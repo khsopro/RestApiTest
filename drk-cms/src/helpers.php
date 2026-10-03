@@ -301,7 +301,7 @@ function form_field(array $f, array $row): string
             $html .= '</div></fieldset>';
             break;
         default:
-            $step = $type === 'number' ? ' step="' . e($opts['step'] ?? '1') . '"' : '';
+            $step = $type === 'number' || isset($opts['step']) ? ' step="' . e($opts['step'] ?? '1') . '"' : '';
             $step .= !empty($opts['list']) ? ' list="' . e($opts['list']) . '"' : '';
             $html .= '<label for="' . $id . '">' . e($label) . '</label><input id="' . $id . '" type="' . e($type)
                 . '" name="' . e($name) . '" value="' . e($value) . '"' . $step . $req . '>';
@@ -405,3 +405,9 @@ function shrink_image(string $path, string $mime, int $maxSide = 2000): void
     };
 }
 
+
+/** Verhindert Formel-Injection beim Öffnen in Excel */
+function csv_safe(string $v): string
+{
+    return preg_match('/^[=+\-@\t\r]/', $v) ? "'" . $v : $v;
+}

@@ -176,7 +176,7 @@ def main():
         c.req(f"admin.php?m=blutspende&a=einkauf_druck&id={tid}")
         html = c.req(f"admin.php?m=blutspende&a=termin&id={tid}&tab=personal")
         assert "beginn<" not in html and "ende–" not in html, "Platzhalter in Standard-Schichten nicht ersetzt"
-        assert re.search(r'Aufbau( <a class="job-link"[^>]*>ⓘ</a>)? <small class="muted">13:30–15:30', html), "Aufbau 13:30–15:30"
+        assert re.search(r'Aufbau( <a class="job-link"[^>]*>ⓘ</a>)?\s*<small class="muted">13:30–15:30', html), "Aufbau 13:30–15:30"
         sid = re.search(r'name="sid" value="(\d+)"', html).group(1)
         c.post(f"admin.php?m=blutspende&a=einteilen&id={tid}", {"sid": sid, "mitglied_id": mid, "status": "zugesagt"})
         html = c.req(f"admin.php?m=blutspende&a=termin&id={tid}&tab=personal")
@@ -305,6 +305,70 @@ def main():
         c.post(f"admin.php?m=helferprofile&a=loeschen&id={lid}", {})
         assert "Lena Neu" not in c.req("admin.php?m=helferprofile&alle=1"); ok += 1
 
+        # Flexibles Schichtsystem: feste + flexible Schichten, Lücken, Stunden
+        def new_helper(vor, nach):
+            c.req("admin.php?m=helferprofile&a=neu")
+            h_ = c.post("admin.php?m=helferprofile&a=speichern", {"vorname": vor, "nachname": nach})
+            return re.search(r'm=helferprofile&amp;a=bearbeiten&amp;id=(\d+)', h_).group(1)
+        carl = new_helper("Carl", "Flex")
+        dora = new_helper("Dora", "Spontan")
+        c.req("admin.php?m=blutspende&a=neu")
+        html = c.post("admin.php?m=blutspende&a=speichern", {"datum": "2099-08-01", "beginn": "15:00", "ende": "19:00", "ort": "Flexhalle"})
+        ft = re.search(r'a=termin&amp;id=(\d+)', html).group(1)
+        P = f"admin.php?m=blutspende&a=termin&id={ft}&tab=personal"
+        c.req(P)
+        c.post(f"admin.php?m=blutspende&a=schicht_add&id={ft}", {"aufgabe": "Anmeldung", "von": "15:00", "bis": "19:00", "benoetigt": "1", "flexibel": "1"})
+        c.post(f"admin.php?m=blutspende&a=schicht_add&id={ft}", {"aufgabe": "Aufbau", "von": "14:00", "bis": "15:00", "benoetigt": "2"})
+        c.post(f"admin.php?m=blutspende&a=schicht_add&id={ft}", {"aufgabe": "Imbiss-Ausgabe", "von": "18:10", "bis": "19:00", "benoetigt": "1", "flexibel": "1"})
+        html = c.req(P)
+        sid_of = lambda name, h_: re.search(r'id="s(\d+)">\s*<div class="shift-head">\s*<h3>' + re.escape(name), h_).group(1)
+        anm, auf, imb = sid_of("Anmeldung", html), sid_of("Aufbau", html), sid_of("Imbiss-Ausgabe", html)
+        assert "18:15–19:00" in html, "Schichtzeiten auf 15 Minuten gerundet"
+        assert 'class="timeline"' in html and "feste Zeit" in html and "flexibel" in html
+        c.post(f"admin.php?m=blutspende&a=einteilen&id={ft}", {"sid": anm, "mitglied_id": mid, "von": "15:00", "bis": "17:00", "status": "zugesagt"})
+        html = c.req(P)
+        assert "Noch offen: 17:00–19:00 (1 fehlt)" in html, "Lücke erkannt"
+        c.post(f"admin.php?m=blutspende&a=einteilen&id={ft}", {"sid": anm, "mitglied_id": carl, "von": "17:00", "bis": "19:00", "status": "zugesagt"})
+        html = c.req(P)
+        assert "Durchgehend besetzt." in html, "Staffelübergabe 15–17 / 17–19 = durchgehend besetzt"
+        assert "bereits eingeteilt" in c.post(f"admin.php?m=blutspende&a=einteilen&id={ft}", {"sid": anm, "mitglied_id": mid, "von": "16:00", "bis": "16:45"})
+        c.post(f"admin.php?m=blutspende&a=einteilen&id={ft}", {"sid": auf, "mitglied_id": mid})
+        c.post(f"admin.php?m=blutspende&a=einteilen&id={ft}", {"sid": auf, "mitglied_id": carl})
+        assert "bereits eingeteilt" in c.post(f"admin.php?m=blutspende&a=einteilen&id={ft}", {"sid": auf, "mitglied_id": carl}), "feste Schicht: Person nur einmal"
+        c.post(f"admin.php?m=blutspende&a=einteilen&id={ft}", {"sid": imb, "mitglied_id": carl, "von": "18:15", "bis": "19:00"})
+        html = c.req(P)
+        assert "Überschneidung mit: Anmeldung" in html, "Konflikt Carl Anmeldung/Imbiss"
+        anna_e = re.search(r'name="eid" value="(\d+)">\s*<select name="von"[^>]*><option value="15:00"[^>]*>15:00</option>.*?value="17:00" selected', html, re.S).group(1)
+        c.post(f"admin.php?m=blutspende&a=einteilung_update&id={ft}", {"eid": anna_e, "von": "13:00", "bis": "16:00", "status": "zugesagt"})
+        html = c.req(P)
+        assert '15:00–16:00 Anmeldung' in html and '14:00–15:00 Aufbau' in html, "Ablauf pro Person, Zeiten eingepasst"
+        assert "16:00–17:00 (1 fehlt)" in html
+        html = c.post(f"admin.php?m=blutspende&a=schicht_update&id={ft}", {"sid": anm, "aufgabe": "Anmeldung", "von": "15:30", "bis": "19:00", "benoetigt": "1", "flexibel": "1"})
+        assert "an das neue Zeitfenster angepasst" in html and "15:30–16:00 Anmeldung" in html
+        assert "Dienstplan Blutspende" in c.req(f"admin.php?m=blutspende&a=dienstplan_druck&id={ft}")
+        # Stunden nach dem Dienst
+        H = f"admin.php?m=blutspende&a=termin&id={ft}&tab=stunden"
+        c.req(H)
+        assert "wie geplant übernommen" in c.post(f"admin.php?m=blutspende&a=stunden_uebernehmen&id={ft}", {})
+        html = c.req(H)
+        e_anna = re.search(r'<td>Anmeldung</td>\s*<td class="nowrap muted">15:30–16:00</td>\s*<td><input type="time" step="900" name="ist_von\[(\d+)\]', html).group(1)
+        e_imb = re.search(r'<td>Imbiss-Ausgabe</td>\s*<td class="nowrap muted">18:15–19:00</td>\s*<td><input type="time" step="900" name="ist_von\[(\d+)\]', html).group(1)
+        html = c.post(f"admin.php?m=blutspende&a=stunden_speichern&id={ft}", {f"ist_von[{e_anna}]": "15:31", f"ist_bis[{e_anna}]": "16:29",
+                                                                              f"ist_von[{e_imb}]": "", f"ist_bis[{e_imb}]": "", f"fehlt[{e_imb}]": "1"})
+        assert "Stunden gespeichert (2 Änderungen)" in html
+        assert "Summe Muster, Anna</td><td class=\"right nowrap\"><strong>2 Std.</strong>" in html, "Anna 14–15 + 15:30–16:30 = 2 Std."
+        assert "Summe Flex, Carl</td><td class=\"right nowrap\"><strong>3 Std.</strong>" in html, "Carl 14–15 + 17–19, Imbiss nicht erschienen"
+        html = c.post(f"admin.php?m=blutspende&a=stunden_nachtragen&id={ft}", {"mitglied_id": dora, "sid": auf, "von": "14:00", "bis": "15:30"})
+        assert "Summe Spontan, Dora</td><td class=\"right nowrap\"><strong>1,5 Std.</strong>" in html
+        html = c.req("admin.php?m=ehrenamt&jahr=2099")
+        assert "Flex, Carl" in html and "3 Std." in html and "6,5 Std." in html, "Jahresauswertung (2 + 3 + 1,5)"
+        csv = c.req("admin.php?m=ehrenamt&a=export&jahr=2099")
+        assert '"Flex, Carl";01.08.2099;Flexhalle;' in csv and "Summe;3,00" in csv, csv[:400]
+        html = c.req(f"admin.php?m=ehrenamt&a=nachweis&id={carl}&jahr=2099")
+        assert "Bescheinigung über ehrenamtliche Tätigkeit" in html and "Insgesamt (1 Einsätze)" in html and "Aufbau, Anmeldung" in html
+        html = c.req(f"admin.php?m=helferprofile&a=profil&id={carl}")
+        assert "tatsächlich 17:00–19:00" in html and "nicht erschienen" in html, "Ist-Zeiten im Helfer-Profil"; ok += 1
+
         # Benutzer für Helferin anlegen, als Helferin anmelden und selbst eintragen
         c.req(f"admin.php?m=benutzer&a=neu&mitglied={mid}")
         c.post("admin.php?m=benutzer&a=speichern", {"benutzername": "anna", "name": "Anna Muster", "passwort": "helferin12345",
@@ -318,7 +382,14 @@ def main():
         s2 = re.findall(r'm=profil&amp;a=eintragen".*?name="sid" value="(\d+)"', html, re.S)[0]
         h.post("admin.php?m=profil&a=eintragen", {"sid": s2})
         html = h.req("admin.php?m=profil")
-        assert "Du bist dabei" in html and "m=stellen&amp;a=ansehen" in html, "Selbst-Eintragung verlinkt Stellenbeschreibungen"
+        assert "Du: " in html and "m=stellen&amp;a=ansehen" in html, "Selbst-Eintragung verlinkt Stellenbeschreibungen"
+        h.req("admin.php?m=profil")
+        html = h.post("admin.php?m=profil&a=eintragen", {"sid": anm, "von": "16:00", "bis": "17:00"})
+        assert "von 16:00 bis 17:00 Uhr eingetragen" in html, "Selbst-Eintragung in die Lücke"
+        assert "schon eingeteilt" in h.post("admin.php?m=profil&a=eintragen", {"sid": anm, "von": "16:30", "bis": "18:00"})
+        assert "schon voll besetzt" in h.post("admin.php?m=profil&a=eintragen", {"sid": anm, "von": "17:00", "bis": "18:00"})
+        html = h.req("admin.php?m=profil")
+        assert "Du: 16:00–17:00" in html and "Meine Ehrenamtsstunden" in html
         html = h.req("admin.php?m=stellen")
         assert "Küche" in html and "Neue Stellenbeschreibung" not in html, "Helfer/innen dürfen nur lesen"
         sid_k = re.search(r'a=ansehen&amp;id=(\d+)">Anmeldung', html).group(1)

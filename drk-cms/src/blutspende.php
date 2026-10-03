@@ -103,6 +103,7 @@ function default_shifts(?string $beginn, ?string $ende): array
             'bis'           => $time((string)$s['std_bis'], $ende),
             'benoetigt'     => max(1, (int)$s['std_anzahl']),
             'qualifikation' => (string)$s['qualifikation'],
+            'flexibel'      => (int)$s['std_flexibel'],
         ];
     }
     if ($out) {
@@ -117,26 +118,13 @@ function default_shifts(?string $beginn, ?string $ende): array
             'bis'           => $time($p[2], $ende),
             'benoetigt'     => max(1, (int)$p[3]),
             'qualifikation' => $p[4],
+            'flexibel'      => 1,
         ];
     }
     return $out;
 }
 
-/** Besetzung eines Termins: [zugesagt, benötigt] */
-function staffing(int $terminId): array
-{
-    $need = (int)val('SELECT COALESCE(SUM(benoetigt),0) FROM bs_schichten WHERE termin_id = ?', [$terminId]);
-    $have = (int)val("SELECT COUNT(*) FROM bs_einteilung e JOIN bs_schichten s ON s.id = e.schicht_id WHERE s.termin_id = ? AND e.status = 'zugesagt'", [$terminId]);
-    return [$have, $need];
-}
 
-function times_overlap(?string $a1, ?string $a2, ?string $b1, ?string $b2): bool
-{
-    if (!$a1 || !$a2 || !$b1 || !$b2) {
-        return true; // ohne Zeitangabe vorsichtshalber als Überschneidung werten
-    }
-    return $a1 < $b2 && $b1 < $a2;
-}
 
 function qualification_options(): array
 {
@@ -276,6 +264,7 @@ function seed_job_descriptions(): int
         insert('bs_stellen', ['titel' => $titel, 'kurz' => $kurz, 'aufgaben' => $aufgaben, 'ablauf' => $ablauf, 'anforderungen' => $anf,
             'qualifikation' => $quali, 'zeitaufwand' => $zeit, 'hinweise' => $hinweise, 'ansprechpartner' => '', 'sortierung' => $i * 10,
             'standard' => 1, 'std_von' => $std[$titel][0], 'std_bis' => $std[$titel][1], 'std_anzahl' => $std[$titel][2],
+            'std_flexibel' => in_array($titel, ['Aufbau', 'Abbau'], true) ? 0 : 1,
             'archiviert' => 0, 'aktualisiert' => now()]);
         $n++;
     }

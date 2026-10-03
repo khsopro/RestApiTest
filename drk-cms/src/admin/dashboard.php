@@ -65,9 +65,9 @@ $today = date('Y-m-d');
     <?php if ($u['mitglied_id']): ?>
         <section class="panel">
             <h2>Meine Einsätze</h2>
-            <?php $mine = all("SELECT t.id, t.datum, t.ort, s.aufgabe, s.von, s.bis, e.status FROM bs_einteilung e
+            <?php $mine = all("SELECT t.id, t.datum, t.ort, s.aufgabe, " . SQL_EFF_VON . " AS von, " . SQL_EFF_BIS . " AS bis, e.status FROM bs_einteilung e
                 JOIN bs_schichten s ON s.id = e.schicht_id JOIN bs_termine t ON t.id = s.termin_id
-                WHERE e.mitglied_id = ? AND t.datum >= ? ORDER BY t.datum, s.von", [$u['mitglied_id'], $today]); ?>
+                WHERE e.mitglied_id = ? AND t.datum >= ? ORDER BY t.datum, von", [$u['mitglied_id'], $today]); ?>
             <?php if (!$mine): ?><p class="muted">Aktuell keine Einsätze eingeplant.</p><?php endif; ?>
             <table>
                 <?php foreach ($mine as $r): ?>

@@ -115,6 +115,7 @@ $modules = [
     'rezepte'       => ['blutspende', 'Rezepte',       '☕', true],
     'helferprofile' => ['blutspende', 'Helfer-Profile', '☺', true],
     'stellen'       => ['blutspende|helfer', 'Stellenbeschreibungen', '☷', true],
+    'ehrenamt'      => ['blutspende|verwaltung', 'Ehrenamtsstunden', '⌛', true],
     'profil'        => ['',           'Mein Profil',   '⚙'],
     'benutzer'      => ['admin',      'Benutzer',      '⚿'],
     'einstellungen' => ['admin',      'Einstellungen', '⚒'],

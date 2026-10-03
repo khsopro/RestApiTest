@@ -3,8 +3,8 @@
 
 $fields = [
     ['datum', 'Datum', 'date', ['required' => true]],
-    ['beginn', 'Beginn', 'time'],
-    ['ende', 'Ende', 'time'],
+    ['beginn', 'Beginn', 'time', ['step' => '900']],
+    ['ende', 'Ende', 'time', ['step' => '900']],
     ['ort', 'Ort / Gebäude', 'text', ['required' => true, 'help' => 'z. B. Gemeindehaus St. Martin']],
     ['adresse', 'Adresse', 'text'],
     ['erwartete_spender', 'Erwartete Spender/innen', 'number'],
@@ -16,11 +16,13 @@ $fieldsResult = [
     ['tatsaechliche_spender', 'Tatsächliche Spender/innen', 'number'],
     ['erstspender', 'davon Erstspender/innen', 'number'],
 ];
-$assignStatus = ['zugesagt' => 'zugesagt', 'angefragt' => 'angefragt', 'abgesagt' => 'abgesagt'];
 $id = (int)get('id', 0);
 $tab = (string)get('tab', 'uebersicht');
 
 $back = fn(string $t) => url_admin('blutspende', 'termin', ['id' => $id, 'tab' => $t]);
+
+// Personaleinteilung, Stundenerfassung, Dienstplan (inkl. eigener POST-Aktionen)
+require __DIR__ . '/bs_personal.php';
 
 /* ---------- Aktionen ---------- */
 if (is_post()) {
@@ -77,50 +79,6 @@ if (is_post()) {
             }
             flash('Menü übernommen.');
             redirect($back('menue'));
-
-        case 'schicht_add':
-            if (post('aufgabe') !== '') {
-                insert('bs_schichten', ['termin_id' => $id, 'aufgabe' => post('aufgabe'), 'von' => post('von') ?: null, 'bis' => post('bis') ?: null,
-                    'benoetigt' => max(1, (int)post('benoetigt')), 'qualifikation' => post('qualifikation')]);
-            }
-            redirect($back('personal'));
-
-        case 'schicht_update':
-            $sid = (int)val('SELECT id FROM bs_schichten WHERE id = ? AND termin_id = ?', [(int)post('sid'), $id]);
-            update('bs_schichten', ['aufgabe' => post('aufgabe'), 'von' => post('von') ?: null, 'bis' => post('bis') ?: null,
-                'benoetigt' => max(1, (int)post('benoetigt')), 'qualifikation' => post('qualifikation')], $sid);
-            redirect($back('personal') . '#s' . $sid);
-
-        case 'schicht_loeschen':
-            q('DELETE FROM bs_schichten WHERE id = ? AND termin_id = ?', [(int)post('sid'), $id]);
-            redirect($back('personal'));
-
-        case 'standard_schichten':
-            $t = one('SELECT * FROM bs_termine WHERE id = ?', [$id]);
-            foreach (default_shifts($t['beginn'] ?? null, $t['ende'] ?? null) as $s) {
-                insert('bs_schichten', $s + ['termin_id' => $id]);
-            }
-            flash('Standard-Schichten angelegt.');
-            redirect($back('personal'));
-
-        case 'einteilen':
-            $sid = (int)post('sid');
-            $mid = (int)post('mitglied_id');
-            if ($mid && !val('SELECT id FROM bs_einteilung WHERE schicht_id = ? AND mitglied_id = ?', [$sid, $mid])) {
-                $st = array_key_exists(post('status'), $assignStatus) ? post('status') : 'zugesagt';
-                insert('bs_einteilung', ['schicht_id' => $sid, 'mitglied_id' => $mid, 'status' => $st]);
-            }
-            redirect($back('personal') . '#s' . $sid);
-
-        case 'einteilung_status':
-            $eid = (int)post('eid');
-            $st = (string)post('status');
-            if ($st === 'entfernen') {
-                q('DELETE FROM bs_einteilung WHERE id = ?', [$eid]);
-            } elseif (array_key_exists($st, $assignStatus)) {
-                q('UPDATE bs_einteilung SET status = ? WHERE id = ?', [$st, $eid]);
-            }
-            redirect($back('personal') . '#s' . (int)post('sid'));
     }
 }
 
@@ -172,20 +130,7 @@ if ($a === 'einkauf_druck' || $a === 'dienstplan_druck') {
         echo render_shopping_list(shopping_list($id), true) . '</div>';
     } else {
         $title = 'Dienstplan';
-        echo '<div class="print-page"><h1>Dienstplan Blutspende</h1><p>' . e($heading) . '</p>';
-        foreach (all('SELECT * FROM bs_schichten WHERE termin_id = ? ORDER BY von, aufgabe', [$id]) as $s) {
-            $people = all("SELECT m.vorname, m.nachname, m.mobil, m.telefon, e.status FROM bs_einteilung e JOIN mitglieder m ON m.id = e.mitglied_id
-                WHERE e.schicht_id = ? AND e.status <> 'abgesagt' ORDER BY m.nachname", [$s['id']]);
-            echo '<h2>' . e($s['aufgabe']) . ' <small>' . e($s['von']) . '–' . e($s['bis']) . ' Uhr · ' . count($people) . '/' . (int)$s['benoetigt'] . '</small></h2><table class="print-table">';
-            foreach ($people as $p) {
-                echo '<tr><td>' . e(member_name($p)) . '</td><td>' . e($p['mobil'] ?: $p['telefon']) . '</td><td>' . ($p['status'] === 'angefragt' ? 'angefragt' : '') . '</td><td class="sign"></td></tr>';
-            }
-            for ($i = count($people); $i < (int)$s['benoetigt']; $i++) {
-                echo '<tr class="open"><td>offen</td><td></td><td></td><td class="sign"></td></tr>';
-            }
-            echo '</table>';
-        }
-        echo '</div>';
+        render_dienstplan_print($t, $id);
     }
     return;
 }
@@ -215,7 +160,7 @@ if ($a === 'termin') {
     }
     [$have, $need] = staffing($id);
     $title = 'Blutspende ' . date_de($t['datum']);
-    $tabs = ['uebersicht' => 'Übersicht', 'menue' => 'Menü', 'einkauf' => 'Einkaufsliste', 'personal' => 'Personaleinteilung'];
+    $tabs = ['uebersicht' => 'Übersicht', 'menue' => 'Menü', 'einkauf' => 'Einkaufsliste', 'personal' => 'Personaleinteilung', 'stunden' => 'Stunden'];
     ?>
     <p class="crumbs"><a href="<?= e(url_admin('blutspende')) ?>">Blutspende</a> › <?= e(date_de($t['datum'])) ?></p>
     <div class="head-row">
@@ -324,110 +269,10 @@ if ($a === 'termin') {
             <?= render_shopping_list(shopping_list($id)) ?>
         </section>
     <?php elseif ($tab === 'personal'):
-        $shifts = all('SELECT * FROM bs_schichten WHERE termin_id = ? ORDER BY von, aufgabe', [$id]);
-        $members = all("SELECT id, vorname, nachname, qualifikationen, bereiche FROM mitglieder WHERE status NOT IN ('ausgetreten', 'foerdernd') AND bs_archiviert = 0 ORDER BY nachname, vorname");
-        $assigned = [];
-        foreach (all('SELECT e.*, s.von, s.bis, s.aufgabe, m.vorname, m.nachname, m.mobil, m.telefon, m.qualifikationen FROM bs_einteilung e
-            JOIN bs_schichten s ON s.id = e.schicht_id JOIN mitglieder m ON m.id = e.mitglied_id WHERE s.termin_id = ? ORDER BY m.nachname', [$id]) as $e) {
-            $assigned[$e['schicht_id']][] = $e;
-        }
-        $allAssigned = array_merge([], ...array_values($assigned));
-        ?>
-        <div class="head-row">
-            <p class="muted">Tragen Sie Helfer/innen in die Schichten ein. ⚠ markiert zeitliche Überschneidungen, ✓ passende Qualifikation.</p>
-            <a class="btn btn-outline" href="<?= e(url_admin('blutspende', 'dienstplan_druck', ['id' => $id])) ?>" target="_blank">Dienstplan drucken</a>
-        </div>
-        <?php if (!$shifts): ?>
-            <div class="panel">
-                <p>Noch keine Schichten angelegt.</p>
-                <?= post_button(url_admin('blutspende', 'standard_schichten', ['id' => $id]), 'Standard-Schichten anlegen', [], '', false, '', 'btn') ?>
-            </div>
-        <?php endif; ?>
-        <div class="shifts">
-            <?php foreach ($shifts as $s):
-                $list = $assigned[$s['id']] ?? [];
-                $ok = count(array_filter($list, fn($e) => $e['status'] === 'zugesagt')); ?>
-                <section class="panel shift" id="s<?= (int)$s['id'] ?>">
-                    <div class="shift-head">
-                        <h3><?= e($s['aufgabe']) ?><?= job_link($s['aufgabe']) ?> <small class="muted"><?= e($s['von']) ?>–<?= e($s['bis']) ?></small></h3>
-                        <?= staffing_badge($ok, (int)$s['benoetigt']) ?>
-                    </div>
-                    <?php if ($s['qualifikation']): ?><p class="small muted">Benötigt: <?= e($s['qualifikation']) ?></p><?php endif; ?>
-                    <ul class="people">
-                        <?php foreach ($list as $e):
-                            $conflict = false;
-                            foreach ($allAssigned as $o) {
-                                if ($o['mitglied_id'] === $e['mitglied_id'] && $o['schicht_id'] !== $e['schicht_id'] && $o['status'] !== 'abgesagt' && $e['status'] !== 'abgesagt'
-                                    && times_overlap($e['von'], $e['bis'], $o['von'], $o['bis'])) {
-                                    $conflict = $o['aufgabe'];
-                                }
-                            }
-                            $qualified = $s['qualifikation'] && str_contains((string)$e['qualifikationen'], $s['qualifikation']); ?>
-                            <li class="st-<?= e($e['status']) ?>">
-                                <span><a href="<?= e(url_admin('helferprofile', 'profil', ['id' => $e['mitglied_id']])) ?>"><?= e(member_name($e)) ?></a><?= $qualified ? ' <span title="Qualifikation vorhanden">✓</span>' : '' ?>
-                                    <?= $conflict ? ' <span class="warn-text" title="Überschneidung mit: ' . e($conflict) . '">⚠</span>' : '' ?>
-                                    <small class="muted"><?= e($e['mobil'] ?: $e['telefon']) ?></small></span>
-                                <form method="post" action="<?= e(url_admin('blutspende', 'einteilung_status', ['id' => $id])) ?>" class="inline">
-                                    <?= csrf_field() ?><input type="hidden" name="eid" value="<?= (int)$e['id'] ?>"><input type="hidden" name="sid" value="<?= (int)$s['id'] ?>">
-                                    <select name="status" onchange="this.form.submit()" class="small-select">
-                                        <?php foreach ($assignStatus + ['entfernen' => '– entfernen –'] as $k => $v): ?>
-                                            <option value="<?= e($k) ?>"<?= $k === $e['status'] ? ' selected' : '' ?>><?= e($v) ?></option>
-                                        <?php endforeach; ?>
-                                    </select>
-                                    <noscript><button class="btn btn-small">OK</button></noscript>
-                                </form>
-                            </li>
-                        <?php endforeach; ?>
-                    </ul>
-                    <form method="post" action="<?= e(url_admin('blutspende', 'einteilen', ['id' => $id])) ?>" class="assign">
-                        <?= csrf_field() ?><input type="hidden" name="sid" value="<?= (int)$s['id'] ?>">
-                        <select name="mitglied_id" required>
-                            <option value="">Person hinzufügen …</option>
-                            <?php
-                            $inShift = array_column($list, 'mitglied_id');
-                            $sorted = $members;
-                            if ($s['qualifikation']) {
-                                usort($sorted, fn($x, $y) => (int)str_contains((string)$y['qualifikationen'], $s['qualifikation']) <=> (int)str_contains((string)$x['qualifikationen'], $s['qualifikation']));
-                            }
-                            foreach ($sorted as $mem):
-                                if (in_array($mem['id'], $inShift)) continue;
-                                $q = $s['qualifikation'] && str_contains((string)$mem['qualifikationen'], $s['qualifikation']); ?>
-                                <option value="<?= (int)$mem['id'] ?>"><?= $q ? '✓ ' : '' ?><?= e($mem['nachname'] . ', ' . $mem['vorname']) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                        <select name="status" class="small-select"><?php foreach ($assignStatus as $k => $v): ?><option value="<?= e($k) ?>"><?= e($v) ?></option><?php endforeach; ?></select>
-                        <button class="btn btn-small">+</button>
-                    </form>
-                    <details class="shift-edit">
-                        <summary>Schicht bearbeiten</summary>
-                        <form method="post" action="<?= e(url_admin('blutspende', 'schicht_update', ['id' => $id])) ?>" class="form-grid compact">
-                            <?= csrf_field() ?><input type="hidden" name="sid" value="<?= (int)$s['id'] ?>">
-                            <?= form_fields([
-                                ['aufgabe', 'Aufgabe', 'text'], ['benoetigt', 'Anzahl', 'number'],
-                                ['von', 'von', 'time'], ['bis', 'bis', 'time'],
-                                ['qualifikation', 'Qualifikation', 'select', ['options' => array_merge([''], qualification_options())]],
-                            ], $s) ?>
-                            <div class="actions wide"><button class="btn btn-small">Speichern</button></div>
-                        </form>
-                        <?= post_button(url_admin('blutspende', 'schicht_loeschen', ['id' => $id]), 'Schicht löschen', ['sid' => $s['id']], '', false, 'Schicht inkl. Einteilungen löschen?', 'btn btn-small btn-danger') ?>
-                    </details>
-                </section>
-            <?php endforeach; ?>
-        </div>
-        <datalist id="stellen"><?php foreach (all('SELECT titel FROM bs_stellen WHERE archiviert = 0 ORDER BY sortierung, titel') as $st): ?><option value="<?= e($st['titel']) ?>"><?php endforeach; ?></datalist>
-        <form method="post" action="<?= e(url_admin('blutspende', 'schicht_add', ['id' => $id])) ?>" class="panel">
-            <?= csrf_field() ?>
-            <h3>Weitere Schicht / Aufgabe</h3>
-            <div class="form-grid">
-                <?= form_fields([
-                    ['aufgabe', 'Aufgabe', 'text', ['required' => true, 'list' => 'stellen', 'help' => 'Vorschläge aus den Stellenbeschreibungen']], ['benoetigt', 'Anzahl Personen', 'number', ['default' => 1]],
-                    ['von', 'von', 'time', ['default' => $t['beginn']]], ['bis', 'bis', 'time', ['default' => $t['ende']]],
-                    ['qualifikation', 'Benötigte Qualifikation', 'select', ['options' => array_merge([''], qualification_options())]],
-                ], []) ?>
-            </div>
-            <button class="btn">Schicht hinzufügen</button>
-        </form>
-    <?php endif;
+        render_personal_tab($t, $id, $back, $assignStatus);
+    elseif ($tab === 'stunden'):
+        render_hours_tab($t, $id);
+    endif;
     return;
 }
 

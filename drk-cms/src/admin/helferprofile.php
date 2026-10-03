@@ -141,9 +141,11 @@ if ($a === 'profil' && $id) {
         redirect(url_admin('helferprofile'));
     }
     $stats = helper_stats()[$id] ?? ['einsaetze' => 0, 'letzter' => null, 'naechster' => null];
-    $einsaetze = all('SELECT t.id, t.datum, t.ort, s.aufgabe, s.von, s.bis, e.status FROM bs_einteilung e
+    $year = (int)date('Y');
+    $hours = volunteer_hours($year . '-01-01', $year . '-12-31', $id)[$id]['minuten'] ?? 0;
+    $einsaetze = all('SELECT t.id, t.datum, t.ort, s.aufgabe, ' . SQL_EFF_VON . ' AS von, ' . SQL_EFF_BIS . ' AS bis, e.status, e.ist_von, e.ist_bis, e.nicht_erschienen FROM bs_einteilung e
         JOIN bs_schichten s ON s.id = e.schicht_id JOIN bs_termine t ON t.id = s.termin_id
-        WHERE e.mitglied_id = ? ORDER BY t.datum DESC, s.von LIMIT 50', [$id]);
+        WHERE e.mitglied_id = ? ORDER BY t.datum DESC, von LIMIT 50', [$id]);
     $aufgaben = all("SELECT s.aufgabe, COUNT(*) AS n FROM bs_einteilung e JOIN bs_schichten s ON s.id = e.schicht_id
         WHERE e.mitglied_id = ? AND e.status = 'zugesagt' GROUP BY s.aufgabe ORDER BY n DESC LIMIT 5", [$id]);
     $title = member_name($m);
@@ -174,6 +176,7 @@ if ($a === 'profil' && $id) {
         <div class="card stat"><strong><?= (int)$stats['einsaetze'] ?></strong>Einsätze bisher</div>
         <div class="card stat"><strong><?= $stats['letzter'] ? e(date_de($stats['letzter'])) : '–' ?></strong>letzter Einsatz</div>
         <div class="card stat"><strong><?= $stats['naechster'] ? e(date_de($stats['naechster'])) : '–' ?></strong>nächster Einsatz</div>
+        <a class="card stat" href="<?= e(url_admin('ehrenamt', 'nachweis', ['id' => $id, 'jahr' => $year])) ?>" target="_blank" title="Bescheinigung drucken"><strong><?= e(num_de($hours / 60, 1)) ?></strong>Ehrenamtsstunden <?= $year ?></a>
     </div>
     <div class="grid-2">
         <section class="panel">
@@ -183,7 +186,7 @@ if ($a === 'profil' && $id) {
                     <?php foreach ($einsaetze as $r): ?>
                         <tr class="<?= $r['datum'] >= $today ? '' : 'past' ?>">
                             <td class="nowrap"><a href="<?= e(url_admin('blutspende', 'termin', ['id' => $r['id'], 'tab' => 'personal'])) ?>"><?= e(date_de($r['datum'])) ?></a></td>
-                            <td><?= e($r['aufgabe']) ?><br><small class="muted"><?= e($r['ort']) ?>, <?= e($r['von']) ?>–<?= e($r['bis']) ?></small></td>
+                            <td><?= e($r['aufgabe']) ?><br><small class="muted"><?= e($r['ort']) ?>, geplant <?= e($r['von']) ?>–<?= e($r['bis']) ?><?php if ((int)$r['nicht_erschienen']): ?> · <span class="warn-text">nicht erschienen</span><?php elseif ($r['ist_von']): ?> · tatsächlich <?= e($r['ist_von']) ?>–<?= e($r['ist_bis']) ?><?php endif; ?></small></td>
                             <td><span class="badge <?= $r['status'] === 'zugesagt' ? 'ok' : ($r['status'] === 'abgesagt' ? 'bad' : 'warn') ?>"><?= e($r['status']) ?></span></td>
                         </tr>
                     <?php endforeach; ?>

@@ -60,26 +60,53 @@ if (is_post()) {
             redirect(url_admin('profil'));
 
         case 'eintragen':
-        case 'austragen':
-            $sid = (int)post('sid');
-            $shift = one('SELECT s.*, t.datum FROM bs_schichten s JOIN bs_termine t ON t.id = s.termin_id WHERE s.id = ?', [$sid]);
-            if ($member && $shift && $shift['datum'] >= date('Y-m-d')) {
-                $taken = (int)val("SELECT COUNT(*) FROM bs_einteilung WHERE schicht_id = ? AND status = 'zugesagt'", [$sid]);
-                $hasQuali = !$shift['qualifikation'] || str_contains((string)$member['qualifikationen'], $shift['qualifikation']);
-                if ($a === 'eintragen' && ($taken >= (int)$shift['benoetigt'] || !$hasQuali)) {
-                    flash('Diese Schicht ist bereits voll oder erfordert eine andere Qualifikation.', 'error');
-                } elseif ($a === 'eintragen') {
-                    $existing = val('SELECT id FROM bs_einteilung WHERE schicht_id = ? AND mitglied_id = ?', [$sid, $mid]);
-                    if ($existing) {
-                        q("UPDATE bs_einteilung SET status = 'zugesagt' WHERE id = ?", [$existing]);
-                    } else {
-                        insert('bs_einteilung', ['schicht_id' => $sid, 'mitglied_id' => $mid, 'status' => 'zugesagt']);
-                    }
-                    flash('Danke! Du bist für „' . $shift['aufgabe'] . '“ eingetragen.');
-                } elseif ($a === 'austragen') {
-                    q("UPDATE bs_einteilung SET status = 'abgesagt' WHERE schicht_id = ? AND mitglied_id = ?", [$sid, $mid]);
-                    flash('Du hast dich ausgetragen. Das Blutspende-Team sieht die Absage.');
+            $shift = one('SELECT s.*, t.datum FROM bs_schichten s JOIN bs_termine t ON t.id = s.termin_id WHERE s.id = ?', [(int)post('sid')]);
+            if (!$member || !$shift || $shift['datum'] < date('Y-m-d')) {
+                redirect(url_admin('profil') . '#einsaetze');
+            }
+            $hasQuali = !$shift['qualifikation'] || str_contains((string)$member['qualifikationen'], $shift['qualifikation']);
+            $times = (int)$shift['flexibel'] ? clamp_to_shift((string)post('von'), (string)post('bis'), $shift) : [$shift['von'], $shift['bis']];
+            $assignments = all('SELECT * FROM bs_einteilung WHERE schicht_id = ?', [$shift['id']]);
+            $cov = shift_coverage($shift, $assignments);
+            $useful = !$cov;
+            foreach ($cov as $m => $n) {
+                if ($times && $m >= t2m($times[0]) && $m < t2m($times[1]) && $n < (int)$shift['benoetigt']) {
+                    $useful = true;
                 }
+            }
+            if (!$cov && count(array_filter($assignments, fn($e) => $e['status'] === 'zugesagt')) >= (int)$shift['benoetigt']) {
+                $useful = false;
+            }
+            // eigene Überschneidungen am selben Termin
+            $clash = null;
+            foreach (all("SELECT e.*, s.aufgabe, s.von AS s_von, s.bis AS s_bis, s.flexibel FROM bs_einteilung e JOIN bs_schichten s ON s.id = e.schicht_id
+                WHERE s.termin_id = ? AND e.mitglied_id = ? AND e.status <> 'abgesagt'", [$shift['termin_id'], $mid]) as $own) {
+                [$ov, $ob] = eff_times($own, ['von' => $own['s_von'], 'bis' => $own['s_bis'], 'flexibel' => $own['flexibel']]);
+                if ($times && t2m($times[0]) < t2m($ob) && t2m($ov) < t2m($times[1])) {
+                    $clash = $own['aufgabe'] . ' ' . $ov . '–' . $ob;
+                }
+            }
+            if (!$hasQuali) {
+                flash('Für diese Aufgabe fehlt dir die Qualifikation „' . $shift['qualifikation'] . '“.', 'error');
+            } elseif (!$times) {
+                flash('Bitte gültige Zeiten wählen („von“ vor „bis“).', 'error');
+            } elseif ($clash) {
+                flash('Zu dieser Zeit bist du schon eingeteilt: ' . $clash . '.', 'error');
+            } elseif (!$useful) {
+                flash('In diesem Zeitraum ist „' . $shift['aufgabe'] . '“ schon voll besetzt.', 'error');
+            } else {
+                insert('bs_einteilung', ['schicht_id' => $shift['id'], 'mitglied_id' => $mid, 'status' => 'zugesagt',
+                    'von' => (int)$shift['flexibel'] ? $times[0] : null, 'bis' => (int)$shift['flexibel'] ? $times[1] : null]);
+                flash('Danke! Du bist für „' . $shift['aufgabe'] . '“ von ' . $times[0] . ' bis ' . $times[1] . ' Uhr eingetragen.');
+            }
+            redirect(url_admin('profil') . '#einsaetze');
+
+        case 'austragen':
+            $own = one('SELECT e.*, t.datum FROM bs_einteilung e JOIN bs_schichten s ON s.id = e.schicht_id JOIN bs_termine t ON t.id = s.termin_id
+                WHERE e.id = ? AND e.mitglied_id = ?', [(int)post('eid'), $mid]);
+            if ($own && $own['datum'] >= date('Y-m-d')) {
+                update('bs_einteilung', ['status' => 'abgesagt'], (int)$own['id']);
+                flash('Du hast dich ausgetragen. Das Blutspende-Team sieht die Absage.');
             }
             redirect(url_admin('profil') . '#einsaetze');
     }
@@ -118,38 +145,64 @@ if (is_post()) {
         <h2>Blutspende – Helfer/innen gesucht</h2>
         <a href="<?= e(url_admin('stellen')) ?>">Was ist bei welcher Aufgabe zu tun? →</a>
     </div>
+    <p class="muted small">Bei flexiblen Aufgaben kannst du selbst wählen, von wann bis wann du hilfst (15-Minuten-Schritte). Du kannst dich auch für mehrere Aufgaben nacheinander eintragen.</p>
     <?php
     $termine = all('SELECT * FROM bs_termine WHERE datum >= ? ORDER BY datum LIMIT 6', [date('Y-m-d')]);
     if (!$termine): ?><p class="muted">Aktuell sind keine Termine geplant.</p><?php endif;
     foreach ($termine as $t):
-        $shifts = all("SELECT s.*,
-                (SELECT COUNT(*) FROM bs_einteilung e WHERE e.schicht_id = s.id AND e.status = 'zugesagt') AS belegt,
-                (SELECT status FROM bs_einteilung e WHERE e.schicht_id = s.id AND e.mitglied_id = ?) AS mein_status
-            FROM bs_schichten s WHERE s.termin_id = ? ORDER BY s.von, s.aufgabe", [$mid, $t['id']]);
+        $shifts = termin_shifts((int)$t['id']);
         if (!$shifts) continue; ?>
         <h3><?= e(date_de($t['datum'], true)) ?> · <?= e($t['ort']) ?> <small class="muted"><?= e($t['beginn']) ?>–<?= e($t['ende']) ?> Uhr</small></h3>
-        <table class="list">
+        <table class="list signup">
             <?php foreach ($shifts as $s):
-                $free = (int)$s['benoetigt'] - (int)$s['belegt'];
-                $hasQuali = !$s['qualifikation'] || str_contains((string)$member['qualifikationen'], $s['qualifikation']); ?>
+                $flex = (int)$s['flexibel'] === 1;
+                $mine = array_filter($s['einteilungen'], fn($e) => (int)$e['mitglied_id'] === $mid && $e['status'] !== 'abgesagt');
+                $hasQuali = !$s['qualifikation'] || str_contains((string)$member['qualifikationen'], $s['qualifikation']);
+                $gaps = $s['summary']['luecken'];
+                $open = $s['summary']['cov'] ? (bool)$gaps : $s['summary']['besetzt'] < $s['summary']['bedarf'];
+                $suggest = $gaps ? [$gaps[0][0], $gaps[0][1]] : [$s['von'], $s['bis']]; ?>
                 <tr>
-                    <td><strong><?= e($s['aufgabe']) ?></strong><?= job_link($s['aufgabe']) ?><?php if ($s['qualifikation']): ?><br><small class="muted">benötigt: <?= e($s['qualifikation']) ?></small><?php endif; ?></td>
-                    <td><?= e($s['von']) ?>–<?= e($s['bis']) ?></td>
-                    <td><?= $free > 0 ? '<span class="badge warn">' . $free . ' frei</span>' : '<span class="badge ok">voll</span>' ?></td>
+                    <td><strong><?= e($s['aufgabe']) ?></strong><?= job_link($s['aufgabe']) ?>
+                        <br><small class="muted"><?= e($s['von']) ?>–<?= e($s['bis']) ?> · <?= $flex ? 'flexible Zeiten' : 'feste Zeit' ?><?= $s['qualifikation'] ? ' · benötigt: ' . e($s['qualifikation']) : '' ?></small>
+                        <?= coverage_bar_small($s) ?></td>
+                    <td class="small"><?php if ($gaps): ?><span class="warn-text">gesucht: <?= e(implode(', ', array_map(fn($g) => $g[0] . '–' . $g[1] . ' (' . $g[2] . ')', $gaps))) ?></span>
+                        <?php elseif ($open): ?><span class="warn-text"><?= $s['summary']['bedarf'] - $s['summary']['besetzt'] ?> frei</span>
+                        <?php else: ?><span class="badge ok">voll</span><?php endif; ?></td>
                     <td class="right">
-                        <?php if ($s['mein_status'] === 'zugesagt' || $s['mein_status'] === 'angefragt'): ?>
-                            <span class="badge ok">Du bist dabei</span>
-                            <?= post_button(url_admin('profil', 'austragen'), 'Absagen', ['sid' => $s['id']], '', false, 'Wirklich absagen?') ?>
-                        <?php elseif ($free > 0 && $hasQuali): ?>
-                            <?= post_button(url_admin('profil', 'eintragen'), 'Ich helfe mit', ['sid' => $s['id']], '', false, '', 'btn btn-small') ?>
-                        <?php elseif (!$hasQuali): ?>
+                        <?php foreach ($mine as $e): ?>
+                            <div class="mine"><span class="badge ok">Du: <?= e($e['eff_von']) ?>–<?= e($e['eff_bis']) ?></span>
+                                <?= post_button(url_admin('profil', 'austragen'), 'Absagen', ['eid' => $e['id']], '', false, 'Wirklich absagen?') ?></div>
+                        <?php endforeach; ?>
+                        <?php if (!$hasQuali): ?>
                             <small class="muted">Qualifikation fehlt</small>
+                        <?php elseif ($open && ($flex || !$mine)): ?>
+                            <form method="post" action="<?= e(url_admin('profil', 'eintragen')) ?>" class="signup-form">
+                                <?= csrf_field() ?><input type="hidden" name="sid" value="<?= (int)$s['id'] ?>">
+                                <?php if ($flex): ?>
+                                    <select name="von" class="small-select" aria-label="von"><?= time_options($s['von'], $s['bis'], $suggest[0]) ?></select>–<select name="bis" class="small-select" aria-label="bis"><?= time_options($s['von'], $s['bis'], $suggest[1]) ?></select>
+                                <?php endif; ?>
+                                <button class="btn btn-small">Ich helfe mit</button>
+                            </form>
                         <?php endif; ?>
                     </td>
                 </tr>
             <?php endforeach; ?>
         </table>
     <?php endforeach; ?>
+</section>
+
+<?php $year = (int)date('Y'); $own = volunteer_hours($year . '-01-01', $year . '-12-31', $mid)[$mid] ?? null; ?>
+<section class="panel">
+    <h2>Meine Ehrenamtsstunden <?= $year ?></h2>
+    <?php if (!$own): ?><p class="muted">Für dieses Jahr sind noch keine Stunden erfasst. Das Blutspende-Team trägt sie nach jedem Dienst ein.</p><?php else: ?>
+        <table class="list">
+            <?php foreach ($own['tage'] as $d): ?>
+                <tr><td class="nowrap"><?= e(date_de($d['datum'])) ?></td><td><?= e($d['ort']) ?><br><small class="muted"><?= e(implode(', ', $d['aufgaben'])) ?></small></td>
+                    <td class="right nowrap"><?= e(hours_de($d['minuten'])) ?></td></tr>
+            <?php endforeach; ?>
+            <tfoot><tr><td colspan="2">Summe (<?= (int)$own['termine'] ?> Einsätze)</td><td class="right nowrap"><?= e(hours_de($own['minuten'])) ?></td></tr></tfoot>
+        </table>
+    <?php endif; ?>
 </section>
 
 <section class="panel">

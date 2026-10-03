@@ -19,7 +19,8 @@ $fieldsStd = [
     ['standard', 'Bei neuen Blutspendeterminen automatisch als Schicht anlegen', 'checkbox', ['wide' => true]],
     ['std_von', 'von', 'text', ['help' => 'Uhrzeit (z. B. 13:30) oder „beginn“ / „ende“ des Termins']],
     ['std_bis', 'bis', 'text', ['help' => 'Uhrzeit oder „beginn“ / „ende“']],
-    ['std_anzahl', 'Anzahl Personen', 'number'],
+    ['std_anzahl', 'Anzahl Personen (gleichzeitig)', 'number'],
+    ['std_flexibel', 'Flexible Zeiten: Helfer/innen können innerhalb der Schicht eigene Zeiten haben (aus = alle arbeiten die ganze Schichtzeit)', 'checkbox', ['wide' => true]],
 ];
 $tab = get('archiv') ? 'archiv' : 'aktiv';
 $backToList = fn(bool $archiv = false) => url_admin('stellen', '', $archiv ? ['archiv' => 1] : []);
@@ -160,8 +161,7 @@ if ($a === 'ansehen' && $id) {
         redirect(url_admin('stellen'));
     }
     $title = $s['titel'];
-    $upcoming = array_slice(array_values(array_filter(all("SELECT t.id, t.datum, t.ort, s.aufgabe, s.von, s.bis, s.benoetigt,
-            (SELECT COUNT(*) FROM bs_einteilung e WHERE e.schicht_id = s.id AND e.status = 'zugesagt') AS belegt
+    $upcoming = array_slice(array_values(array_filter(all("SELECT t.id, t.datum, t.ort, s.id AS sid, s.aufgabe, s.von, s.bis, s.benoetigt
         FROM bs_schichten s JOIN bs_termine t ON t.id = s.termin_id
         WHERE t.datum >= ? ORDER BY t.datum, s.von", [date('Y-m-d')]),
         fn($r) => mb_strtolower(trim($r['aufgabe'])) === mb_strtolower(trim($s['titel'])))), 0, 10);
@@ -190,7 +190,7 @@ if ($a === 'ansehen' && $id) {
                                 ? '<a href="' . e(url_admin('blutspende', 'termin', ['id' => $u['id'], 'tab' => 'personal'])) . '">' . e(date_de($u['datum'], true)) . '</a>'
                                 : e(date_de($u['datum'], true)) ?></td>
                         <td><?= e($u['ort']) ?><br><small class="muted"><?= e($u['von']) ?>–<?= e($u['bis']) ?> Uhr</small></td>
-                        <td><?= staffing_badge((int)$u['belegt'], (int)$u['benoetigt']) ?></td>
+                        <td><?php $sum = shift_summary_by_id((int)$u['sid']); ?><?= staffing_badge($sum['besetzt'], $sum['bedarf']) ?></td>
                     </tr>
                 <?php endforeach; ?>
             </table>
@@ -203,7 +203,7 @@ if ($a === 'ansehen' && $id) {
 
 /* ---------- Anlegen / Bearbeiten ---------- */
 if (($a === 'neu' || $a === 'bearbeiten') && $canEdit) {
-    $row = $id ? one('SELECT * FROM bs_stellen WHERE id = ?', [$id]) : ['sortierung' => 100, 'std_von' => 'beginn', 'std_bis' => 'ende', 'std_anzahl' => 1];
+    $row = $id ? one('SELECT * FROM bs_stellen WHERE id = ?', [$id]) : ['sortierung' => 100, 'std_von' => 'beginn', 'std_bis' => 'ende', 'std_anzahl' => 1, 'std_flexibel' => 1];
     if (!$row) {
         redirect(url_admin('stellen'));
     }
@@ -271,7 +271,7 @@ $title = 'Stellenbeschreibungen';
             <?php if ($s['kurz']): ?><p class="muted"><?= e($s['kurz']) ?></p><?php endif; ?>
             <div class="tags">
                 <?= $s['qualifikation'] ? '<span class="tag">' . e($s['qualifikation']) . '</span>' : '' ?>
-                <?= (int)$s['standard'] ? '<span class="tag tag-grey" title="wird bei neuen Terminen automatisch eingeplant">Standard-Schicht · ' . (int)$s['std_anzahl'] . ' Pers.</span>' : '' ?>
+                <?= (int)$s['standard'] ? '<span class="tag tag-grey" title="wird bei neuen Terminen automatisch eingeplant">Standard-Schicht · ' . (int)$s['std_anzahl'] . ' Pers. · ' . ((int)$s['std_flexibel'] ? 'flexibel' : 'fest') . '</span>' : '' ?>
             </div>
             <div class="profile-stats">
                 <?php if ($s['zeitaufwand']): ?><span><?= e($s['zeitaufwand']) ?></span><?php endif; ?>

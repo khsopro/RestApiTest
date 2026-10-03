@@ -115,11 +115,6 @@ if ($a === 'export') {
     exit;
 }
 
-/** Verhindert Formel-Injection beim Öffnen in Excel */
-function csv_safe(string $v): string
-{
-    return preg_match('/^[=+\-@\t\r]/', $v) ? "'" . $v : $v;
-}
 
 /* ---------- Formular ---------- */
 if ($a === 'neu' || $a === 'bearbeiten') {
