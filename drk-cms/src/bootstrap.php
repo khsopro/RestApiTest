@@ -37,6 +37,7 @@ require __DIR__ . '/blocks.php';
 require __DIR__ . '/blutspende.php';
 require __DIR__ . '/schichten.php';
 require __DIR__ . '/news.php';
+require __DIR__ . '/social.php';
 
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: SAMEORIGIN');

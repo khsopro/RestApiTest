@@ -78,6 +78,22 @@ $today = date('Y-m-d');
         </section>
     <?php endif; ?>
 
+    <?php if (has_role('redaktion|oeffentlichkeit')):
+        $smNext = all("SELECT * FROM sm_beitraege WHERE status <> 'veroeffentlicht' AND datum BETWEEN ? AND ? ORDER BY datum, uhrzeit LIMIT 6",
+            [date('Y-m-d', strtotime('-7 days')), date('Y-m-d', strtotime('+7 days'))]); ?>
+        <section class="panel">
+            <h2>Social Media – nächste 7 Tage</h2>
+            <?php if (!$smNext): ?><p class="muted">Nichts geplant. <a href="<?= e(url_admin('social')) ?>">Redaktionsplan öffnen</a></p><?php endif; ?>
+            <ul class="plain">
+                <?php foreach ($smNext as $p): ?>
+                    <li><strong class="<?= $p['datum'] < $today ? 'warn-text' : '' ?>"><?= e(date_de($p['datum'], true)) ?></strong>
+                        <a href="<?= e(url_admin('social', 'bearbeiten', ['id' => $p['id']])) ?>"><?= e($p['titel']) ?></a>
+                        <span class="badge st-<?= e($p['status']) ?>"><?= e(sm_status()[$p['status']] ?? '') ?></span></li>
+                <?php endforeach; ?>
+            </ul>
+        </section>
+    <?php endif; ?>
+
     <?php if (has_role('redaktion')): ?>
         <section class="panel">
             <h2>Zuletzt bearbeitete Seiten</h2>

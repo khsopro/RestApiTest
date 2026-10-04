@@ -8,6 +8,12 @@ $layout = $page['layout'] ?: 'standard';
 $activeTop = $parent['id'] ?? $page['id'];
 $article ??= null;
 $basePath = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/')), '/') . '/';
+// Vorschau beim Teilen (Open Graph): Bild aus Meldung → Kopfbild → Standardbild → Logo
+$ogImageId = (int)($article['bild'] ?? 0) ?: (int)$page['hero_bild'] ?: (int)setting('og_bild') ?: $logoId;
+$ogImage = $ogImageId && media_url($ogImageId) ? abs_url(media_url($ogImageId)) : '';
+$canonical = $article ? abs_url(url_news($article['slug'])) : ($page['id'] || $isHome ? abs_url(url_page($isHome ? '' : $page['slug'])) : '');
+$ogTitle = $isHome ? $siteTitle : $page['titel'];
+$ogDesc = $page['beschreibung'] ?: setting('untertitel');
 $footerPages = all('SELECT titel, slug FROM seiten WHERE veroeffentlicht = 1 AND im_menue = 0 AND ist_startseite = 0 AND parent_id IS NULL ORDER BY sortierung');
 ?>
 <!DOCTYPE html>
@@ -18,6 +24,20 @@ $footerPages = all('SELECT titel, slug FROM seiten WHERE veroeffentlicht = 1 AND
     <base href="<?= e($basePath) ?>">
     <title><?= e($isHome ? $siteTitle : $page['titel'] . ' – ' . $siteTitle) ?></title>
     <?php if ($page['beschreibung']): ?><meta name="description" content="<?= e($page['beschreibung']) ?>"><?php endif; ?>
+    <?php if ($canonical): ?>
+    <link rel="canonical" href="<?= e($canonical) ?>">
+    <meta property="og:url" content="<?= e($canonical) ?>">
+    <?php endif; ?>
+    <meta property="og:type" content="<?= $article ? 'article' : 'website' ?>">
+    <meta property="og:site_name" content="<?= e($siteTitle) ?>">
+    <meta property="og:locale" content="de_DE">
+    <meta property="og:title" content="<?= e($ogTitle) ?>">
+    <?php if ($ogDesc): ?><meta property="og:description" content="<?= e(mb_strimwidth($ogDesc, 0, 300, '…')) ?>"><?php endif; ?>
+    <?php if ($ogImage): ?>
+    <meta property="og:image" content="<?= e($ogImage) ?>">
+    <meta name="twitter:card" content="summary_large_image">
+    <?php endif; ?>
+    <?php if ($article): ?><meta property="article:published_time" content="<?= e($article['datum']) ?>"><?php endif; ?>
     <link rel="alternate" type="application/rss+xml" title="Aktuelles – <?= e($siteTitle) ?>" href="feed.php">
     <link rel="stylesheet" href="assets/site.css?v=<?= CMS_VERSION ?>">
 </head>
@@ -31,6 +51,7 @@ $footerPages = all('SELECT titel, slug FROM seiten WHERE veroeffentlicht = 1 AND
 <div class="topbar">
     <div class="wrap">
         <span><?= e(setting('notruf_hinweis')) ?></span>
+        <?= social_links_html('social-links top') ?>
         <a href="admin.php"><?= current_user() ? 'Verwaltung' : 'Mitglieder-Login' ?></a>
     </div>
 </div>
@@ -102,6 +123,7 @@ $footerPages = all('SELECT titel, slug FROM seiten WHERE veroeffentlicht = 1 AND
                 <?php if ($article['bild']): ?><figure class="figure article-img"><?= render_image((int)$article['bild']) ?></figure><?php endif; ?>
                 <?php if ($article['teaser']): ?><p class="lead"><?= e($article['teaser']) ?></p><?php endif; ?>
                 <div class="prose"><?= md($article['inhalt']) ?></div>
+                <?= share_buttons(abs_url(url_news($article['slug'])), $article['titel']) ?>
                 <?php if ($parent): ?><p class="back"><a href="<?= e(url_page($parent['slug'])) ?>">← Alle Meldungen</a></p><?php endif; ?>
             </article>
         <?php endif; ?>
@@ -115,7 +137,8 @@ $footerPages = all('SELECT titel, slug FROM seiten WHERE veroeffentlicht = 1 AND
     <div class="wrap footer-grid">
         <div>
             <h2><?= e($siteTitle) ?></h2>
-            <div class="prose"><?= md(setting('kontakt_text')) ?></div>
+            <div class="prose"><?= md(setting('kontakt_text')) ?>    <?= social_links_html('social-links footer') ?>
+        </div>
         </div>
         <div>
             <h2>Seiten</h2>
@@ -136,6 +159,17 @@ $footerPages = all('SELECT titel, slug FROM seiten WHERE veroeffentlicht = 1 AND
 document.querySelector('.nav-toggle')?.addEventListener('click', function () {
     var open = document.body.classList.toggle('nav-open');
     this.setAttribute('aria-expanded', open ? 'true' : 'false');
+});
+document.addEventListener('click', function (e) {
+    var btn = e.target.closest('.share-copy');
+    if (!btn) return;
+    var box = btn.closest('.share'), url = box.dataset.shareUrl, text = box.dataset.shareText;
+    if (navigator.share && window.matchMedia('(pointer: coarse)').matches) {
+        navigator.share({ title: text, text: text, url: url }).catch(function () {});
+        return;
+    }
+    var done = function () { btn.querySelector('span').textContent = 'Kopiert!'; setTimeout(function () { btn.querySelector('span').textContent = 'Link kopieren'; }, 2000); };
+    if (navigator.clipboard) { navigator.clipboard.writeText(url).then(done); } else { window.prompt('Link kopieren:', url); }
 });
 </script>
 </body>

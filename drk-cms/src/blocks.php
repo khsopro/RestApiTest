@@ -209,10 +209,12 @@ function render_block(array $block, array $page): string
             $html = '';
             foreach ($rows as $r) {
                 $ts = strtotime($r['datum']);
-                $html .= '<li class="event"><div class="event-date"><span>' . date('d', $ts) . '</span>' . e(month_short((int)date('n', $ts))) . '</div><div>'
+                $share = share_buttons(abs_url(url_page($page['slug'] ?? '')) . '#termin-' . $r['id'],
+                    'Blutspende am ' . date_de($r['datum'], true) . ($r['beginn'] ? ', ' . $r['beginn'] . '–' . $r['ende'] . ' Uhr' : '') . ' – ' . $r['ort']);
+                $html .= '<li class="event" id="termin-' . (int)$r['id'] . '"><div class="event-date"><span>' . date('d', $ts) . '</span>' . e(month_short((int)date('n', $ts))) . '</div><div>'
                     . '<strong>' . e(date_de($r['datum'], true)) . ($r['beginn'] ? ', ' . e($r['beginn']) . '–' . e($r['ende']) . ' Uhr' : '') . '</strong><br>'
                     . e($r['ort']) . ($r['adresse'] ? ', ' . e($r['adresse']) : '')
-                    . ($r['hinweis'] ? '<br><small>' . e($r['hinweis']) . '</small>' : '') . '</div></li>';
+                    . ($r['hinweis'] ? '<br><small>' . e($r['hinweis']) . '</small>' : '') . $share . '</div></li>';
             }
             if (!$html) {
                 $html = '<li class="empty">Zurzeit sind keine Termine eingetragen.</li>';

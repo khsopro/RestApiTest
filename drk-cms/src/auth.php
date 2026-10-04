@@ -9,6 +9,7 @@ function roles(): array
         'redaktion'  => 'Redaktion (Seiten & Medien)',
         'verwaltung' => 'Mitglieder- & Unterstützerverwaltung',
         'blutspende' => 'Blutspende-Team (Termine, Rezepte, Einteilung)',
+        'oeffentlichkeit' => 'Öffentlichkeitsarbeit (Social Media, Kampagnen)',
         'helfer'     => 'Helfer/in (nur eigenes Profil & eigene Einsätze)',
     ];
 }

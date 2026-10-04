@@ -93,7 +93,7 @@ def main():
         c.req("index.php?seite=gibtsnicht", expect=404); ok += 1
 
         # Alle Module aufrufen
-        for m in ["dashboard", "seiten", "news", "medien", "mitglieder", "unterstuetzer", "blutspende", "rezepte", "helferprofile", "stellen", "profil", "benutzer", "einstellungen", "protokoll"]:
+        for m in ["dashboard", "seiten", "news", "medien", "mitglieder", "unterstuetzer", "blutspende", "rezepte", "helferprofile", "stellen", "ehrenamt", "social", "profil", "benutzer", "einstellungen", "protokoll"]:
             c.req(f"admin.php?m={m}")
         ok += 1
 
@@ -368,6 +368,78 @@ def main():
         assert "Bescheinigung über ehrenamtliche Tätigkeit" in html and "Insgesamt (1 Einsätze)" in html and "Aufbau, Anmeldung" in html
         html = c.req(f"admin.php?m=helferprofile&a=profil&id={carl}")
         assert "tatsächlich 17:00–19:00" in html and "nicht erschienen" in html, "Ist-Zeiten im Helfer-Profil"; ok += 1
+
+        # Social Media: Einstellungen, Website-Vorschau, Redaktionsplan, Kampagnen
+        import html as htmlmod
+        def form_values(h_):
+            vals = {}
+            for m_ in re.finditer(r'<input[^>]*type="(?:text|email|tel|number)"[^>]*name="([^"]+)"[^>]*value="([^"]*)"', h_):
+                vals[m_.group(1)] = htmlmod.unescape(m_.group(2))
+            for m_ in re.finditer(r'<textarea[^>]*name="([^"]+)"[^>]*>(.*?)</textarea>', h_, re.S):
+                vals[m_.group(1)] = htmlmod.unescape(m_.group(2))
+            return vals
+        vals = form_values(c.req("admin.php?m=einstellungen"))
+        assert "Save the Date" in vals["sm_vorlage_ankuendigung"], "Standardvorlage vorbelegt"
+        vals.update({"website_url": "https://www.drk-test.de", "social_facebook": "https://www.facebook.com/drktest",
+                     "social_instagram": "javascript:alert(1)"})
+        html = c.post("admin.php?m=einstellungen", vals)
+        assert "muss mit https:// beginnen" in html
+        vals["social_instagram"] = "https://www.instagram.com/drktest"
+        c.post("admin.php?m=einstellungen", vals)
+        html = c.req("index.php")
+        assert '<meta property="og:url" content="https://www.drk-test.de/">' in html and 'og:title' in html
+        assert 'href="https://www.facebook.com/drktest"' in html and 'href="https://www.instagram.com/drktest"' in html
+        assert "javascript:" not in html
+        html = c.req("index.php?seite=blutspende")
+        assert "facebook.com/sharer/sharer.php?u=https%3A%2F%2Fwww.drk-test.de%2Findex.php%3Fseite%3Dblutspende%23termin-" in html
+        html = c.req("index.php?news=neue-sanitaetsrucksaecke-fuer-die-bereitschaft")
+        assert '<meta property="og:type" content="article">' in html and 'class="share"' in html
+        assert 'og:url" content="https://www.drk-test.de/index.php?news=neue-sanitaetsrucksaecke-fuer-die-bereitschaft"' in html
+        # Redaktionsplan
+        for t_ in ["plan", "kalender", "kampagnen", "auswertung"]:
+            c.req(f"admin.php?m=social&tab={t_}")
+        html = c.post("admin.php?m=social&a=vorlage_termin", {"termin_id": ft})
+        assert "3 Beitragsentwürfe" in html and "Blutspende 01.08.2099 – Erinnerung" in html
+        pid_ = re.search(r'm=social&amp;a=bearbeiten&amp;id=(\d+)">\s*<strong>Blutspende 01.08.2099 – Ankündigung', html).group(1)
+        html = c.req(f"admin.php?m=social&a=bearbeiten&id={pid_}")
+        fb = htmlmod.unescape(re.search(r'id="copy-facebook"[^>]*>(.*?)</textarea>', html, re.S).group(1))
+        ig = htmlmod.unescape(re.search(r'id="copy-instagram"[^>]*>(.*?)</textarea>', html, re.S).group(1))
+        assert "Samstag, 01.08.2099" in fb and "Flexhalle" in fb and "{" not in fb, "Platzhalter ersetzt"
+        assert "https://www.drk-test.de/index.php?seite=blutspende" in fb and "#Blutspende" in fb
+        assert "Link in unserer Bio" in ig and "https://" not in ig, "Instagram ohne (nicht klickbaren) Link"
+        html = c.post(f"admin.php?m=social&a=speichern&id={pid_}", {"titel": "Ankündigung <script>x</script>", "datum": "2099-07-18", "uhrzeit": "18:00",
+                                                                      "kanal": "facebook", "status": "geplant", "text": "Hallo <b>Welt</b>", "hashtags": "#DRK", "link": "javascript:alert(1)"})
+        assert "<script>x</script>" not in html and "Hallo &lt;b&gt;Welt" in html and "javascript:" not in html
+        assert 'id="copy-instagram"' not in html, "nur Facebook-Text bei Kanal Facebook"
+        assert "Veröffentlicht am" in c.post(f"admin.php?m=social&a=veroeffentlicht&id={pid_}", {})
+        assert "Ankündigung &lt;script&gt;" in c.req("admin.php?m=social&tab=plan&vergangen=1")
+        assert "Blutspende 01.08.2099 – Erinnerung" in c.req("admin.php?m=social&tab=kalender&monat=2099-07")
+        nid = re.search(r'<option value="(\d+)">[^<]*Neue Sanitätsrucksäcke', c.req("admin.php?m=social")).group(1)
+        html = c.post("admin.php?m=social&a=vorlage_news", {"news_id": nid})
+        assert "Meldung: Neue Sanitätsrucksäcke" in html and "index.php?news=neue-sanitaetsrucksaecke" in html
+        # Kampagne + Auswertung (Kosten je Spender/in)
+        c.req("admin.php?m=social&a=kampagne")
+        c.post("admin.php?m=social&a=kampagne_speichern", {"name": "Herbstaktion", "kanal": "beide", "start": "2099-07-10", "ende": "2099-07-31",
+                                                            "budget": "60", "kosten": "50", "klicks": "200", "reichweite": "8000", "termin_id": ft})
+        html = c.req("admin.php?m=social&tab=kampagnen")
+        assert "Herbstaktion" in html and "0,25 €" in html, "Kosten je Klick"
+        c.req(f"admin.php?m=blutspende&a=bearbeiten&id={ft}")
+        c.post(f"admin.php?m=blutspende&a=speichern&id={ft}", {"datum": "2099-08-01", "beginn": "15:00", "ende": "19:00", "ort": "Flexhalle",
+                                                               "oeffentlich": "1", "tatsaechliche_spender": "25", "erstspender": "5"})
+        html = c.req("admin.php?m=social&tab=auswertung&jahr=2099")
+        assert "<strong>50 €</strong>Werbekosten 2099" in html
+        assert "2 €" in html and "mit Werbekampagne" in html, "Kosten je Spender/in 50 € / 25"
+        # Rolle Öffentlichkeitsarbeit
+        c.req("admin.php?m=benutzer&a=neu")
+        c.post("admin.php?m=benutzer&a=speichern", {"benutzername": "presse", "passwort": "presse123456", "rollen[]": ["oeffentlichkeit"], "aktiv": "1"})
+        pr = Client()
+        pr.req("admin.php?m=login")
+        pr.post("admin.php?m=login", {"benutzername": "presse", "passwort": "presse123456"})
+        assert "Social Media – nächste 7 Tage" in pr.req("admin.php")
+        pr.req("admin.php?m=social")
+        pr.req("admin.php?m=medien")
+        pr.req("admin.php?m=seiten", expect=403)
+        pr.req("admin.php?m=mitglieder", expect=403); ok += 1
 
         # Benutzer für Helferin anlegen, als Helferin anmelden und selbst eintragen
         c.req(f"admin.php?m=benutzer&a=neu&mitglied={mid}")

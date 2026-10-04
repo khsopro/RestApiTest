@@ -19,6 +19,7 @@ Ein schlankes Content-Management-System für DRK-Ortsvereine: öffentliche Websi
 | **15 Bausteine** | Text · Bild & Text · Bild · Zwei Spalten · Kacheln · Unterseiten als Kacheln · Hinweisbox · Schaltfläche · Fragen & Antworten · Ansprechpartner/in · Zahlen & Fakten · **Blutspendetermine (automatisch)** · **Unterstützer/Sponsoren (automatisch)** · **Aktuelles/News (automatisch)** · Adresse/Anfahrt |
 | **Einfache Formatierung** | `## Überschrift`, `**fett**`, `*kursiv*`, `- Liste`, `[Link](https://…)` – kein HTML nötig |
 | **Aktuelles / News** | Meldungen mit Bild, Kurzfassung, Bereich und Autor/in; wichtige Meldungen oben anheften; Veröffentlichung im Voraus planen (erscheint erst ab dem Datum); Archivseite mit Seitenzahlen; Filter nach Bereich (z. B. nur JRK-Meldungen auf der JRK-Seite); RSS-Feed unter `feed.php` |
+| **Social Media auf der Website** | Links zu Facebook und Instagram in Kopf- und Fußzeile; schöne Vorschau (Bild, Titel, Text) beim Teilen von Links (Open Graph); Teilen-Knöpfe bei Meldungen und Blutspendeterminen (Facebook, WhatsApp, E-Mail, Link kopieren) – als einfache Links ohne Facebook-Plugins, es werden keine Daten an Meta übertragen |
 | **Entwürfe & Vorschau** | Unveröffentlichte Seiten sind nur für angemeldete Redakteure sichtbar |
 | **Mobilfreundlich** | responsives Layout mit Menü-Schaltfläche |
 
@@ -26,6 +27,7 @@ Ein schlankes Content-Management-System für DRK-Ortsvereine: öffentliche Websi
 | Modul | Inhalt |
 |---|---|
 | **Aktuelles** | Meldungen schreiben, planen, anheften, als Entwurf speichern, durchsuchen |
+| **Social Media** | Redaktionsplan (Liste und Kalender) mit Status *Idee → Entwurf → Geplant → Veröffentlicht*; Vorlagen „Blutspendetermin bewerben“ (3 Beiträge: 14 Tage, 3 Tage, 1 Tag vorher) und „Meldung teilen“; fertige Texte zum Kopieren für Facebook (mit Link) und Instagram (mit „Link in der Bio“, Zeichen- und Hashtag-Zähler); Werbekampagnen mit Budget, Kosten, Reichweite und Klicks; Auswertung Werbekosten je Spender/in und Vergleich Termine mit/ohne Werbung. Veröffentlicht wird weiterhin über Facebook/Instagram bzw. die Meta Business Suite |
 | **Mitglieder** | Stammdaten, Status (aktiv, fördernd, passiv, JRK, ausgetreten), Bereiche, Funktion, Datenschutz-Einwilligung, Filter nach Bereich und Qualifikation, CSV-Export (Excel-tauglich) |
 | **Profile** | Qualifikationen (Sanitäter, Hygienebelehrung …), Verfügbarkeit, „Über mich“. Helfer/innen pflegen ihr Profil unter *Mein Profil* selbst. |
 | **Unterstützer** | Privatpersonen, Firmen, Stiftungen, Art und Höhe der Unterstützung, Logo, optionale Nennung auf der Website |
@@ -47,7 +49,8 @@ Ein schlankes Content-Management-System für DRK-Ortsvereine: öffentliche Websi
 | Rolle | darf |
 |---|---|
 | `admin` | alles, inkl. Benutzer und Einstellungen |
-| `redaktion` | Seiten, Aktuelles und Medien |
+| `redaktion` | Seiten, Aktuelles, Medien und Social Media |
+| `oeffentlichkeit` | Social Media (Redaktionsplan, Kampagnen) und Medien |
 | `verwaltung` | Mitglieder und Unterstützer |
 | `blutspende` | Termine, Rezepte, Menü, Einkauf, Personaleinteilung, Helfer-Profile (nur lesen) |
 | `helfer` | eigenes Profil, Selbst-Eintragung in Schichten, Stellenbeschreibungen lesen |
@@ -74,7 +77,7 @@ Ob eine Aufgabe fest oder flexibel ist, wird in der Stellenbeschreibung (für ne
 1. **Dateien hochladen:** Den Inhalt des Ordners `drk-cms/` per FTP in das Webverzeichnis kopieren.
 2. **Schreibrechte:** Die Ordner `data/` und `uploads/` müssen für den Webserver beschreibbar sein.
 3. **Aufrufen:** `https://ihre-domain.de/admin.php` öffnen. Der Einrichtungsassistent fragt nach dem Vereinsnamen und legt das erste Administratorkonto an. Beispielseiten, -rezepte und eine Schicht-Vorlage werden automatisch erstellt.
-4. **Anpassen:** Unter *Einstellungen* Kontaktdaten, Bereiche, Qualifikationen und das Logo hinterlegen. **Impressum und Datenschutzerklärung ausfüllen!**
+4. **Anpassen:** Unter *Einstellungen* die Adresse der Website, Facebook-/Instagram-Adressen, ein Standardbild fürs Teilen, Kontaktdaten, Bereiche, Qualifikationen und das Logo hinterlegen. **Impressum und Datenschutzerklärung ausfüllen!**
 
 ### Optional: MySQL statt SQLite
 `config.sample.php` nach `config.php` kopieren und die MySQL-Zeilen aktivieren. Die Tabellen werden beim ersten Aufruf automatisch angelegt.

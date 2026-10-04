@@ -13,6 +13,7 @@ function seed_defaults(string $vereinsname): void
         'bereiche'      => "Vorstand\nBereitschaft\nJugendrotkreuz\nBlutspende\nWohlfahrts- und Sozialarbeit\nSeniorenarbeit\nAusbildung",
         'qualifikationen' => "Erste-Hilfe-Kurs\nSanitätshelfer/in\nSanitäter/in\nRettungssanitäter/in\nNotfallsanitäter/in\nErste-Hilfe-Ausbilder/in\nBetreuungsdienst\nFührerschein C1\nHygienebelehrung (§ 43 IfSG)\nJugendgruppenleiter/in (Juleica)",
         'bs_standard_schichten' => "Aufbau | 13:30 | beginn | 4 |\nAnmeldung | beginn | ende | 2 |\nArztzimmer/Labor-Unterstützung | beginn | ende | 1 | Sanitätshelfer/in\nRuheraum/Betreuung | beginn | ende | 2 | Erste-Hilfe-Kurs\nKüche | 13:00 | ende | 3 | Hygienebelehrung (§ 43 IfSG)\nImbiss-Ausgabe | beginn | ende | 2 | Hygienebelehrung (§ 43 IfSG)\nAbbau | ende | 21:00 | 4 |",
+        'sm_hashtags'   => '#Blutspende #DRK #Lebensretter #Ehrenamt',
         'rezept_kategorien' => "Salat\nWarmes Gericht\nBelegte Brötchen\nDessert\nKuchen\nGetränke",
         'einkauf_abteilungen' => "Obst & Gemüse\nBrot & Backwaren\nKühlregal\nFleisch & Wurst\nKäse\nTrockenware\nKonserven\nGewürze & Öl\nGetränke\nTiefkühl\nVerbrauchsmaterial",
     ];

@@ -316,3 +316,39 @@ table.hours tr.absent td input { text-decoration: none; }
 .shift .people li { flex-wrap: wrap; }
 .shift .people .person { flex: 1 1 100%; }
 .shift .people .assign-row { flex: 1 1 100%; justify-content: flex-start; }
+
+/* Social Media */
+.sm-layout { grid-template-columns: 3fr 2fr; }
+.sm-preview { position: sticky; top: 16px; }
+.copy-box { margin-bottom: 16px; }
+.copy-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.copy-head strong { display: inline-flex; gap: 6px; align-items: center; }
+.copy-box textarea { font-size: .88rem; background: #fafbfc; }
+.sm-image { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.sm-image img { max-width: 100%; max-height: 220px; border-radius: var(--radius); border: 1px solid var(--line); }
+.sm-icons { white-space: nowrap; color: #4a5058; }
+.sm-icons svg { width: 18px; height: 18px; margin-right: 2px; }
+.badge.st-idee { background: #eceef1; color: #4a5058; }
+.badge.st-entwurf { background: #fff1d6; color: var(--warn); }
+.badge.st-geplant { background: #e3e8f4; color: #2f4a7a; }
+.badge.st-veroeffentlicht { background: #e3f2e4; color: var(--ok); }
+tr.today td { background: #fffbea; }
+.sub-tabs { border-bottom-width: 1px; margin-bottom: 12px; }
+.sub-tabs a { padding: 6px 12px; font-size: .9rem; }
+.cal-nav h2 { margin: 0; }
+.calendar { table-layout: fixed; background: #fff; border: 1px solid var(--line); }
+.calendar th { text-align: center; font-size: .8rem; color: var(--muted); background: #fafbfc; }
+.calendar td { height: 110px; vertical-align: top; padding: 4px; border: 1px solid var(--line); }
+.calendar td.other { background: #fafbfc; color: #a0a6ad; }
+.calendar td.today { background: #fffbea; }
+.cal-day { display: flex; justify-content: space-between; font-size: .8rem; font-weight: 600; }
+.cal-add { text-decoration: none; color: var(--muted); opacity: 0; padding: 0 4px; }
+.calendar td:hover .cal-add { opacity: 1; }
+.cal-event { font-size: .72rem; background: var(--rot); color: #fff; border-radius: 3px; padding: 1px 4px; margin-top: 3px; }
+.cal-post { display: block; font-size: .72rem; border-radius: 3px; padding: 1px 4px; margin-top: 3px; text-decoration: none; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-left: 3px solid #9aa0a6; background: #f1f2f4; }
+.cal-post.st-entwurf { border-color: var(--warn); background: #fff6e3; }
+.cal-post.st-geplant { border-color: #2f4a7a; background: #eef2fa; }
+.cal-post.st-veroeffentlicht { border-color: var(--ok); background: #edf7ee; }
+@media (max-width: 900px) { .sm-layout { grid-template-columns: 1fr; } .sm-preview { position: static; } .calendar td { height: 70px; } }
+.cal-legend { font-size: .85rem; color: var(--muted); margin-top: 10px; display: flex; gap: 6px; align-items: center; }

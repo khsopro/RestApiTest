@@ -25,3 +25,17 @@ document.addEventListener('click', function (e) {
         }
     }
 });
+
+// Text in die Zwischenablage kopieren (Social-Media-Beiträge)
+document.addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-copy]');
+    if (!btn) return;
+    var field = document.querySelector(btn.getAttribute('data-copy'));
+    if (!field) return;
+    var done = function () { var t = btn.textContent; btn.textContent = 'Kopiert ✓'; setTimeout(function () { btn.textContent = t; }, 1800); };
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(field.value).then(done);
+    } else {
+        field.select(); document.execCommand('copy'); done();
+    }
+});
