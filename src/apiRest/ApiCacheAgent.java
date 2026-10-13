@@ -43,6 +43,31 @@ public class ApiCacheAgent extends AgentBase {
     private static final String CONFIG_VIEW = "vwVariableAll";
     private static final String DEFAULT_CACHE_VIEW = "vwApiCache";
     private static final String KEEPWEB_SUBDIR = "apicache";
+    private static final String AGENT_CONFIG_PROFILE = "ApiCacheConfig";
+
+    /**
+     * Liest das Feld "AgentServer" aus dem Profildokument "ApiCacheConfig" -
+     * derselbe Wert, den auch die LotusScript-Seite (TriggerCacheRebuild)
+     * fuer das Server-Routing per New NotesDatabase(serverName, ...) nutzt.
+     * Leerer Rueckgabewert = keine Einschraenkung konfiguriert.
+     */
+    private String getConfiguredAgentServer(Database db) {
+        try {
+            Document profileDoc = db.getProfileDocument(AGENT_CONFIG_PROFILE, "");
+
+            if(profileDoc == null) {
+                return "";
+            }
+
+            String server = profileDoc.getItemValueString("AgentServer");
+            profileDoc.recycle();
+
+            return (server != null) ? server.trim() : "";
+
+        } catch(Exception e) {
+            return "";
+        }
+    }
 
     public void NotesMain() {
 
@@ -83,7 +108,23 @@ public class ApiCacheAgent extends AgentBase {
                 return;
             }
 
-            // Normaler Voll-Durchlauf, z.B. per Zeitplan-Trigger.
+            // Normaler Voll-Durchlauf, z.B. per Zeitplan-Trigger ("Any
+            // server"). Nur auf dem im Profildokument konfigurierten Server
+            // tatsaechlich arbeiten, damit sich "Any server" in der
+            // Agent-Planung nicht faktisch auf mehrere Server gleichzeitig
+            // auswirkt - der gezielte Aufruf oben wird ja bereits von
+            // LotusScript auf den richtigen Server geroutet und braucht
+            // diese Pruefung nicht.
+            String configuredServer = getConfiguredAgentServer(db);
+            String currentServer = db.getServer();
+
+            if(!configuredServer.isEmpty() && !configuredServer.equalsIgnoreCase(currentServer)) {
+                System.out.println("ApiCacheAgent: Konfigurierter Server '" + configuredServer
+                    + "' (Profildokument 'ApiCacheConfig', Feld 'AgentServer') stimmt nicht mit "
+                    + "aktuellem Server '" + currentServer + "' ueberein, Voll-Durchlauf uebersprungen.");
+                return;
+            }
+
             View configView = db.getView(CONFIG_VIEW);
             configView.setAutoUpdate(false);
 
