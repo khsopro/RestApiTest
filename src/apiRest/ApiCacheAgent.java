@@ -28,8 +28,9 @@ import org.json.JSONObject;
  * Laeuft nur auf dem Server aus Profildokument "ApiCacheConfig", Feld
  * "AgentServer". Pro Zeitplan-Lauf werden zuerst die offenen
  * Request-Dokumente (Form "ApiCacheRequest", View vwApiCacheRequests)
- * nacheinander abgearbeitet. Kam seit 30 Minuten kein Request, werden alle
- * Endpoints neu gebaut (hoechstens alle 30 Minuten). Die Zeitstempel dafuer
+ * nacheinander abgearbeitet. Kam seit "UpdateInterval" Minuten (Feld in
+ * "ApiCacheConfig", Standard 30) kein Request, werden alle Endpoints neu
+ * gebaut, hoechstens in diesem Abstand. Die Zeitstempel dafuer
  * liegen im Profildokument "ApiCacheState".
  *
  * Java-Agents in dieser Domino-Umgebung akzeptieren nur genau eine
@@ -50,7 +51,43 @@ public class ApiCacheAgent extends AgentBase {
     private static final String AGENT_CONFIG_PROFILE = "ApiCacheConfig";
     private static final String AGENT_STATE_PROFILE = "ApiCacheState";
     private static final String QUEUE_VIEW = "vwApiCacheRequests";
-    private static final long IDLE_MILLIS = 30L * 60L * 1000L;
+    private static final int DEFAULT_UPDATE_INTERVAL_MINUTES = 30;
+
+    /**
+     * Liest das Feld "UpdateInterval" (Minuten) aus dem Profildokument
+     * "ApiCacheConfig" - als Zahl- oder Textfeld. Fehlt es oder ist es
+     * ungueltig (nicht positiv), gilt DEFAULT_UPDATE_INTERVAL_MINUTES.
+     */
+    private long getUpdateIntervalMillis(Database db) {
+        int minutes = 0;
+
+        try {
+            Document profileDoc = db.getProfileDocument(AGENT_CONFIG_PROFILE, "");
+
+            if(profileDoc != null) {
+                minutes = (int) profileDoc.getItemValueDouble("UpdateInterval");
+
+                if(minutes <= 0) {
+                    String text = profileDoc.getItemValueString("UpdateInterval");
+                    if(text != null && !text.trim().isEmpty()) {
+                        minutes = Integer.parseInt(text.trim());
+                    }
+                }
+
+                profileDoc.recycle();
+            }
+        } catch(Exception e) {
+            minutes = 0;
+        }
+
+        if(minutes <= 0) {
+            System.out.println("ApiCacheAgent: Kein gueltiges 'UpdateInterval' im Profildokument '"
+                + AGENT_CONFIG_PROFILE + "', verwende " + DEFAULT_UPDATE_INTERVAL_MINUTES + " Minuten.");
+            minutes = DEFAULT_UPDATE_INTERVAL_MINUTES;
+        }
+
+        return minutes * 60L * 1000L;
+    }
 
     /**
      * Liest das Feld "AgentServer" aus dem Profildokument "ApiCacheConfig".
@@ -130,8 +167,9 @@ public class ApiCacheAgent extends AgentBase {
             }
 
             // Zeitplan-Lauf: zuerst die Request-Queue abarbeiten. Nur wenn
-            // seit IDLE_MILLIS kein Request mehr kam, alle Endpoints neu
-            // bauen - und auch dann hoechstens alle IDLE_MILLIS.
+            // seit "UpdateInterval" Minuten kein Request mehr kam, alle
+            // Endpoints neu bauen - und auch dann hoechstens in diesem
+            // Abstand.
             Document state = db.getProfileDocument(AGENT_STATE_PROFILE, "");
             long now = System.currentTimeMillis();
 
@@ -142,10 +180,11 @@ public class ApiCacheAgent extends AgentBase {
                 return;
             }
 
+            long interval = getUpdateIntervalMillis(db);
             long lastRequest = (long) state.getItemValueDouble("LastRequestMillis");
             long lastFullRun = (long) state.getItemValueDouble("LastFullRunMillis");
 
-            if(now - lastRequest < IDLE_MILLIS || now - lastFullRun < IDLE_MILLIS) {
+            if(now - lastRequest < interval || now - lastFullRun < interval) {
                 state.recycle();
                 return;
             }
