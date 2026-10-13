@@ -46,10 +46,8 @@ public class ApiCacheAgent extends AgentBase {
     private static final String AGENT_CONFIG_PROFILE = "ApiCacheConfig";
 
     /**
-     * Liest das Feld "AgentServer" aus dem Profildokument "ApiCacheConfig" -
-     * derselbe Wert, den auch die LotusScript-Seite (TriggerCacheRebuild)
-     * fuer das Server-Routing per New NotesDatabase(serverName, ...) nutzt.
-     * Leerer Rueckgabewert = keine Einschraenkung konfiguriert.
+     * Liest das Feld "AgentServer" aus dem Profildokument "ApiCacheConfig".
+     * Leerer Rueckgabewert = nicht konfiguriert (Agent laeuft dann nicht).
      */
     private String getConfiguredAgentServer(Database db) {
         try {
@@ -75,6 +73,26 @@ public class ApiCacheAgent extends AgentBase {
             Session session = getSession();
             AgentContext agentContext = session.getAgentContext();
             Database db = agentContext.getCurrentDatabase();
+
+            // Server-Pruefung fuer beide Aufrufarten (gezielt und komplett):
+            // nur auf dem im Profildokument konfigurierten Server arbeiten.
+            // Fehlt die Konfiguration (Profildokument nicht vorhanden oder
+            // Feld leer), wird gar nicht gelaufen.
+            String configuredServer = getConfiguredAgentServer(db);
+
+            if(configuredServer.isEmpty()) {
+                System.out.println("ApiCacheAgent: Kein Server im Profildokument '" + AGENT_CONFIG_PROFILE
+                    + "' (Feld 'AgentServer') konfiguriert oder Profildokument nicht gefunden - abgebrochen.");
+                return;
+            }
+
+            String currentServer = db.getServer();
+
+            if(!configuredServer.equalsIgnoreCase(currentServer)) {
+                System.out.println("ApiCacheAgent: Konfigurierter Server '" + configuredServer
+                    + "' stimmt nicht mit aktuellem Server '" + currentServer + "' ueberein - abgebrochen.");
+                return;
+            }
 
             // Gezielter Aufruf, z.B. aus einem Publish-Button per
             // agent.RunOnServer(configDoc.NoteID): die uebergebene NoteID
@@ -108,36 +126,7 @@ public class ApiCacheAgent extends AgentBase {
                 return;
             }
 
-            // Normaler Voll-Durchlauf, z.B. per Zeitplan-Trigger ("Any
-            // server"). Nur auf dem im Profildokument konfigurierten Server
-            // tatsaechlich arbeiten, damit sich "Any server" in der
-            // Agent-Planung nicht faktisch auf mehrere Server gleichzeitig
-            // auswirkt - der gezielte Aufruf oben wird ja bereits von
-            // LotusScript auf den richtigen Server geroutet und braucht
-            // diese Pruefung nicht.
-            //
-            // Fehlt die Konfiguration komplett (Profildokument nicht
-            // vorhanden oder Feld leer), wird NICHT gelaufen - bewusst kein
-            // "unbeschraenkt auf jedem Server"-Fallback mehr, um
-            // Mehrfachlaeufe bei "Any server" nicht versehentlich zuzulassen.
-            String configuredServer = getConfiguredAgentServer(db);
-
-            if(configuredServer.isEmpty()) {
-                System.out.println("ApiCacheAgent: Kein Server im Profildokument '" + AGENT_CONFIG_PROFILE
-                    + "' (Feld 'AgentServer') konfiguriert oder Profildokument nicht gefunden - "
-                    + "Voll-Durchlauf abgebrochen.");
-                return;
-            }
-
-            String currentServer = db.getServer();
-
-            if(!configuredServer.equalsIgnoreCase(currentServer)) {
-                System.out.println("ApiCacheAgent: Konfigurierter Server '" + configuredServer
-                    + "' (Profildokument '" + AGENT_CONFIG_PROFILE + "', Feld 'AgentServer') stimmt nicht mit "
-                    + "aktuellem Server '" + currentServer + "' ueberein, Voll-Durchlauf uebersprungen.");
-                return;
-            }
-
+            // Normaler Voll-Durchlauf, z.B. per Zeitplan-Trigger.
             View configView = db.getView(CONFIG_VIEW);
             configView.setAutoUpdate(false);
 
