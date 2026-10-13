@@ -3,6 +3,7 @@ package apiRest;
 import java.security.MessageDigest;
 import java.text.ParseException;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -19,11 +20,17 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
- * Scheduled Agent: baut fuer jeden in vwVariableAll definierten Endpoint das
- * JSON einmalig vor (getData() unten, gleiche Logik wie DataService.getData()
- * unter Code/Java) und legt es zusammen mit dem passenden ETag in einem
- * Cache-Dokument ab. ApiServiceBean bleibt davon unberuehrt und bedient
- * weiterhin live aus der View, falls (noch) kein Cache-Dokument existiert.
+ * Scheduled Agent: baut das JSON der in vwVariableAll definierten Endpoints
+ * vor (getData() unten, gleiche Logik wie DataService.getData() unter
+ * Code/Java) und legt es zusammen mit dem passenden ETag in einem
+ * Cache-Dokument ab.
+ *
+ * Laeuft nur auf dem Server aus Profildokument "ApiCacheConfig", Feld
+ * "AgentServer". Pro Zeitplan-Lauf werden zuerst die offenen
+ * Request-Dokumente (Form "ApiCacheRequest", View vwApiCacheRequests)
+ * nacheinander abgearbeitet. Kam seit 30 Minuten kein Request, werden alle
+ * Endpoints neu gebaut (hoechstens alle 30 Minuten). Die Zeitstempel dafuer
+ * liegen im Profildokument "ApiCacheState".
  *
  * Java-Agents in dieser Domino-Umgebung akzeptieren nur genau eine
  * kompilierte Klasse - weder eine zweite Top-Level-Klasse in derselben Datei
@@ -41,6 +48,9 @@ public class ApiCacheAgent extends AgentBase {
     private static final String CONFIG_VIEW = "vwVariableAll";
     private static final String DEFAULT_CACHE_VIEW = "vwApiCache";
     private static final String AGENT_CONFIG_PROFILE = "ApiCacheConfig";
+    private static final String AGENT_STATE_PROFILE = "ApiCacheState";
+    private static final String QUEUE_VIEW = "vwApiCacheRequests";
+    private static final long IDLE_MILLIS = 30L * 60L * 1000L;
 
     /**
      * Liest das Feld "AgentServer" aus dem Profildokument "ApiCacheConfig".
@@ -71,8 +81,7 @@ public class ApiCacheAgent extends AgentBase {
             AgentContext agentContext = session.getAgentContext();
             Database db = agentContext.getCurrentDatabase();
 
-            // Server-Pruefung fuer beide Aufrufarten (gezielt und komplett):
-            // nur auf dem im Profildokument konfigurierten Server arbeiten.
+            // Nur auf dem im Profildokument konfigurierten Server arbeiten.
             // Fehlt die Konfiguration (Profildokument nicht vorhanden oder
             // Feld leer), wird gar nicht gelaufen.
             String configuredServer = getConfiguredAgentServer(db);
@@ -91,13 +100,10 @@ public class ApiCacheAgent extends AgentBase {
                 return;
             }
 
-            // Gezielter Aufruf, z.B. aus einem Publish-Button per
-            // agent.RunOnServer(configDoc.NoteID): die uebergebene NoteID
-            // kommt als ParameterDocID der aktuell laufenden Agent-Instanz
-            // an, NICHT ueber getDocumentContext() - das ist fuer im
-            // Speicher erzeugte Dokumente von C/C++-API-Aufrufern gedacht
-            // und liefert bei einem normalen Run()/RunOnServer(noteId)
-            // immer null.
+            // Gezielter Aufruf per agent.RunOnServer(configDoc.NoteID): die
+            // NoteID kommt als ParameterDocID an, nicht ueber
+            // getDocumentContext() (das liefert bei Run/RunOnServer immer
+            // null).
             Agent currentAgent = agentContext.getCurrentAgent();
             String paramDocId = (currentAgent != null) ? currentAgent.getParameterDocID() : null;
 
@@ -123,51 +129,178 @@ public class ApiCacheAgent extends AgentBase {
                 return;
             }
 
-            // Normaler Voll-Durchlauf, z.B. per Zeitplan-Trigger.
-            View configView = db.getView(CONFIG_VIEW);
-            configView.setAutoUpdate(false);
+            // Zeitplan-Lauf: zuerst die Request-Queue abarbeiten. Nur wenn
+            // seit IDLE_MILLIS kein Request mehr kam, alle Endpoints neu
+            // bauen - und auch dann hoechstens alle IDLE_MILLIS.
+            Document state = db.getProfileDocument(AGENT_STATE_PROFILE, "");
+            long now = System.currentTimeMillis();
 
-            ViewNavigator nav = configView.createViewNav();
-            ViewEntry entry = nav.getFirst();
-
-            while(entry != null) {
-
-                if(!entry.isCategory()) {
-
-                    Vector values = entry.getColumnValues();
-                    String endpoint = (values.size() > 0 && values.get(0) != null)
-                        ? values.get(0).toString().trim().toLowerCase()
-                        : null;
-
-                    if(endpoint != null && !endpoint.isEmpty()) {
-                        try {
-                            // Dokument direkt vom Entry holen statt ueber
-                            // einen zweiten db.getView(CONFIG_VIEW)-Handle:
-                            // Domino gibt bei gleichem Viewnamen oft denselben
-                            // gecachten Handle zurueck - ein Recycle davon in
-                            // buildAndStore() hat hier die View invalidiert,
-                            // aus der nav/entry noch iteriert wurden
-                            // ("Entry removed or recycled").
-                            Document configDoc = entry.getDocument();
-                            buildAndStore(session, db, endpoint, configDoc);
-                        } catch(Exception e) {
-                            System.out.println("ApiCacheAgent: Fehler bei Endpoint '" + endpoint + "': " + e);
-                            e.printStackTrace();
-                        }
-                    }
-                }
-
-                ViewEntry tmp = nav.getNext(entry);
-                entry.recycle();
-                entry = tmp;
+            if(processQueue(session, db)) {
+                state.replaceItemValue("LastRequestMillis", Double.valueOf(now));
+                state.save(true, false);
+                state.recycle();
+                return;
             }
 
-            nav.recycle();
-            configView.recycle();
+            long lastRequest = (long) state.getItemValueDouble("LastRequestMillis");
+            long lastFullRun = (long) state.getItemValueDouble("LastFullRunMillis");
+
+            if(now - lastRequest < IDLE_MILLIS || now - lastFullRun < IDLE_MILLIS) {
+                state.recycle();
+                return;
+            }
+
+            runFullScan(session, db);
+
+            state.replaceItemValue("LastFullRunMillis", Double.valueOf(now));
+            state.save(true, false);
+            state.recycle();
 
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    /**
+     * Arbeitet alle offenen Requests (View QUEUE_VIEW, aelteste zuerst)
+     * nacheinander ab. Mehrere Requests fuer dasselbe Config-Dokument werden
+     * nur einmal gebaut. Jeder Request wird danach auf "done" bzw. "error"
+     * gesetzt und anonymisiert ($UpdatedBy entfernt) liegen gelassen.
+     *
+     * @return true, wenn mindestens ein Request verarbeitet wurde
+     */
+    private boolean processQueue(Session session, Database db) throws Exception {
+
+        View queueView = db.getView(QUEUE_VIEW);
+
+        if(queueView == null) {
+            System.out.println("ApiCacheAgent: View '" + QUEUE_VIEW + "' nicht gefunden, Queue uebersprungen.");
+            return false;
+        }
+
+        // Erst alle UNIDs einsammeln, dann verarbeiten: ein Request mit
+        // geaendertem Status faellt aus der View, das wuerde eine laufende
+        // Iteration ueber die View durcheinanderbringen.
+        queueView.setAutoUpdate(false);
+        List<String> requestUnids = new ArrayList<String>();
+
+        Document request = queueView.getFirstDocument();
+        while(request != null) {
+            requestUnids.add(request.getUniversalID());
+            Document next = queueView.getNextDocument(request);
+            request.recycle();
+            request = next;
+        }
+        queueView.recycle();
+
+        if(requestUnids.isEmpty()) {
+            return false;
+        }
+
+        // ConfigUNID -> Fehlertext ("" = erfolgreich gebaut)
+        Map<String, String> results = new HashMap<String, String>();
+
+        for(String requestUnid : requestUnids) {
+
+            Document req = db.getDocumentByUNID(requestUnid);
+            String configUnid = req.getItemValueString("ConfigUNID").trim();
+
+            if(!results.containsKey(configUnid)) {
+                results.put(configUnid, buildFromConfigUnid(session, db, configUnid));
+            }
+
+            String error = results.get(configUnid);
+
+            req.replaceItemValue("Status", error.isEmpty() ? "done" : "error");
+            if(!error.isEmpty()) {
+                req.replaceItemValue("ErrorText", error);
+            }
+            req.replaceItemValue("ProcessedAt", session.createDateTime(new Date()));
+            req.removeItem("$UpdatedBy");
+            req.save(true, false);
+            req.recycle();
+        }
+
+        System.out.println("ApiCacheAgent: " + requestUnids.size() + " Request(s) verarbeitet, "
+            + results.size() + " Endpoint(s) gebaut.");
+
+        return true;
+    }
+
+    /**
+     * Baut den Endpoint des Config-Dokuments mit der gegebenen UNID.
+     *
+     * @return "" bei Erfolg, sonst eine Fehlerbeschreibung
+     */
+    private String buildFromConfigUnid(Session session, Database db, String configUnid) {
+        try {
+            if(configUnid.isEmpty()) {
+                return "Request ohne ConfigUNID";
+            }
+
+            Document configDoc = db.getDocumentByUNID(configUnid);
+            String endpoint = configDoc.getItemValueString("Titel").trim().toLowerCase();
+
+            if(endpoint.isEmpty()) {
+                configDoc.recycle();
+                return "Config-Dokument " + configUnid + " ohne 'Titel'";
+            }
+
+            buildAndStore(session, db, endpoint, configDoc);
+            return "";
+
+        } catch(Exception e) {
+            System.out.println("ApiCacheAgent: Fehler beim Bauen fuer ConfigUNID '" + configUnid + "': " + e);
+            e.printStackTrace();
+            return e.toString();
+        }
+    }
+
+    /**
+     * Baut alle Endpoints aus CONFIG_VIEW neu.
+     */
+    private void runFullScan(Session session, Database db) throws Exception {
+
+        View configView = db.getView(CONFIG_VIEW);
+        configView.setAutoUpdate(false);
+
+        ViewNavigator nav = configView.createViewNav();
+        ViewEntry entry = nav.getFirst();
+
+        while(entry != null) {
+
+            if(!entry.isCategory()) {
+
+                Vector values = entry.getColumnValues();
+                String endpoint = (values.size() > 0 && values.get(0) != null)
+                    ? values.get(0).toString().trim().toLowerCase()
+                    : null;
+
+                if(endpoint != null && !endpoint.isEmpty()) {
+                    try {
+                        // Dokument direkt vom Entry holen statt ueber einen
+                        // zweiten db.getView(CONFIG_VIEW)-Handle: Domino gibt
+                        // bei gleichem Viewnamen oft denselben gecachten
+                        // Handle zurueck, ein Recycle davon wuerde die View
+                        // invalidieren, ueber die hier noch iteriert wird.
+                        Document configDoc = entry.getDocument();
+                        buildAndStore(session, db, endpoint, configDoc);
+                    } catch(Exception e) {
+                        System.out.println("ApiCacheAgent: Fehler bei Endpoint '" + endpoint + "': " + e);
+                        e.printStackTrace();
+                    }
+                }
+            }
+
+            ViewEntry tmp = nav.getNext(entry);
+            entry.recycle();
+            entry = tmp;
+        }
+
+        nav.recycle();
+        configView.recycle();
+
+        System.out.println("ApiCacheAgent: Kompletter Lauf abgeschlossen.");
     }
 
     private void buildAndStore(Session session, Database db, String endpoint, Document configDoc) throws Exception {
