@@ -115,12 +115,25 @@ public class ApiCacheAgent extends AgentBase {
             // auswirkt - der gezielte Aufruf oben wird ja bereits von
             // LotusScript auf den richtigen Server geroutet und braucht
             // diese Pruefung nicht.
+            //
+            // Fehlt die Konfiguration komplett (Profildokument nicht
+            // vorhanden oder Feld leer), wird NICHT gelaufen - bewusst kein
+            // "unbeschraenkt auf jedem Server"-Fallback mehr, um
+            // Mehrfachlaeufe bei "Any server" nicht versehentlich zuzulassen.
             String configuredServer = getConfiguredAgentServer(db);
+
+            if(configuredServer.isEmpty()) {
+                System.out.println("ApiCacheAgent: Kein Server im Profildokument '" + AGENT_CONFIG_PROFILE
+                    + "' (Feld 'AgentServer') konfiguriert oder Profildokument nicht gefunden - "
+                    + "Voll-Durchlauf abgebrochen.");
+                return;
+            }
+
             String currentServer = db.getServer();
 
-            if(!configuredServer.isEmpty() && !configuredServer.equalsIgnoreCase(currentServer)) {
+            if(!configuredServer.equalsIgnoreCase(currentServer)) {
                 System.out.println("ApiCacheAgent: Konfigurierter Server '" + configuredServer
-                    + "' (Profildokument 'ApiCacheConfig', Feld 'AgentServer') stimmt nicht mit "
+                    + "' (Profildokument '" + AGENT_CONFIG_PROFILE + "', Feld 'AgentServer') stimmt nicht mit "
                     + "aktuellem Server '" + currentServer + "' ueberein, Voll-Durchlauf uebersprungen.");
                 return;
             }
