@@ -32,7 +32,9 @@ import org.json.JSONObject;
  * "ApiCacheConfig", Millisekunden, Standard 30 Minuten) kein Request,
  * werden alle Endpoints neu
  * gebaut, hoechstens in diesem Abstand. Die Zeitstempel dafuer
- * liegen im Profildokument "ApiCacheState".
+ * liegen im Profildokument "ApiCacheState". Erledigte Requests werden nach
+ * "RequestRetention" (Feld in "ApiCacheConfig", Millisekunden, Standard 24
+ * Stunden) geloescht.
  *
  * Java-Agents in dieser Domino-Umgebung akzeptieren nur genau eine
  * kompilierte Klasse - weder eine zweite Top-Level-Klasse in derselben Datei
@@ -52,24 +54,26 @@ public class ApiCacheAgent extends AgentBase {
     private static final String AGENT_CONFIG_PROFILE = "ApiCacheConfig";
     private static final String AGENT_STATE_PROFILE = "ApiCacheState";
     private static final String QUEUE_VIEW = "vwApiCacheRequests";
+    private static final String DONE_REQUESTS_VIEW = "vwApiCacheRequestsDone";
     private static final long DEFAULT_UPDATE_INTERVAL_MILLIS = 30L * 60L * 1000L;
+    private static final long DEFAULT_REQUEST_RETENTION_MILLIS = 24L * 60L * 60L * 1000L;
 
     /**
-     * Liest das Feld "UpdateInterval" (Millisekunden) aus dem Profildokument
-     * "ApiCacheConfig" - als Zahl- oder Textfeld. Fehlt es oder ist es
-     * ungueltig (nicht positiv), gilt DEFAULT_UPDATE_INTERVAL_MILLIS.
+     * Liest ein Millisekunden-Feld aus dem Profildokument "ApiCacheConfig" -
+     * als Zahl- oder Textfeld. Fehlt es oder ist es ungueltig (nicht
+     * positiv), gilt defaultMillis.
      */
-    private long getUpdateIntervalMillis(Database db) {
+    private long getConfigMillis(Database db, String field, long defaultMillis) {
         long millis = 0;
 
         try {
             Document profileDoc = db.getProfileDocument(AGENT_CONFIG_PROFILE, "");
 
             if(profileDoc != null) {
-                millis = (long) profileDoc.getItemValueDouble("UpdateInterval");
+                millis = (long) profileDoc.getItemValueDouble(field);
 
                 if(millis <= 0) {
-                    String text = profileDoc.getItemValueString("UpdateInterval");
+                    String text = profileDoc.getItemValueString(field);
                     if(text != null && !text.trim().isEmpty()) {
                         millis = Long.parseLong(text.trim());
                     }
@@ -82,9 +86,9 @@ public class ApiCacheAgent extends AgentBase {
         }
 
         if(millis <= 0) {
-            System.out.println("ApiCacheAgent: Kein gueltiges 'UpdateInterval' im Profildokument '"
-                + AGENT_CONFIG_PROFILE + "', verwende " + DEFAULT_UPDATE_INTERVAL_MILLIS + " ms.");
-            millis = DEFAULT_UPDATE_INTERVAL_MILLIS;
+            System.out.println("ApiCacheAgent: Kein gueltiges '" + field + "' im Profildokument '"
+                + AGENT_CONFIG_PROFILE + "', verwende " + defaultMillis + " ms.");
+            millis = defaultMillis;
         }
 
         return millis;
@@ -171,8 +175,11 @@ public class ApiCacheAgent extends AgentBase {
             // seit "UpdateInterval" (Millisekunden) kein Request mehr kam, alle
             // Endpoints neu bauen - und auch dann hoechstens in diesem
             // Abstand.
-            Document state = db.getProfileDocument(AGENT_STATE_PROFILE, "");
             long now = System.currentTimeMillis();
+
+            cleanupRequests(db, now - getConfigMillis(db, "RequestRetention", DEFAULT_REQUEST_RETENTION_MILLIS));
+
+            Document state = db.getProfileDocument(AGENT_STATE_PROFILE, "");
 
             if(processQueue(session, db)) {
                 state.replaceItemValue("LastRequestMillis", Double.valueOf(now));
@@ -181,7 +188,7 @@ public class ApiCacheAgent extends AgentBase {
                 return;
             }
 
-            long interval = getUpdateIntervalMillis(db);
+            long interval = getConfigMillis(db, "UpdateInterval", DEFAULT_UPDATE_INTERVAL_MILLIS);
             long lastRequest = (long) state.getItemValueDouble("LastRequestMillis");
             long lastFullRun = (long) state.getItemValueDouble("LastFullRunMillis");
 
@@ -265,6 +272,71 @@ public class ApiCacheAgent extends AgentBase {
             + results.size() + " Endpoint(s) gebaut.");
 
         return true;
+    }
+
+    /**
+     * Loescht erledigte Requests (Status "done"/"error"), deren ProcessedAt
+     * vor cutoffMillis liegt. DONE_REQUESTS_VIEW muss nach ProcessedAt
+     * aufsteigend sortiert sein, damit beim ersten zu jungen Request
+     * abgebrochen werden kann. Fehler hier brechen den Lauf nicht ab.
+     */
+    private void cleanupRequests(Database db, long cutoffMillis) {
+        try {
+            View doneView = db.getView(DONE_REQUESTS_VIEW);
+
+            if(doneView == null) {
+                System.out.println("ApiCacheAgent: View '" + DONE_REQUESTS_VIEW + "' nicht gefunden, Aufraeumen uebersprungen.");
+                return;
+            }
+
+            // Erst einsammeln, dann loeschen - Loeschen waehrend der
+            // Iteration wuerde die View-Navigation durcheinanderbringen.
+            doneView.setAutoUpdate(false);
+            List<String> expiredUnids = new ArrayList<String>();
+
+            Document doc = doneView.getFirstDocument();
+            while(doc != null) {
+                long processed = getProcessedMillis(doc);
+
+                if(processed > cutoffMillis) {
+                    doc.recycle();
+                    break;
+                }
+
+                expiredUnids.add(doc.getUniversalID());
+                Document next = doneView.getNextDocument(doc);
+                doc.recycle();
+                doc = next;
+            }
+            doneView.recycle();
+
+            for(String unid : expiredUnids) {
+                Document expired = db.getDocumentByUNID(unid);
+                expired.remove(true);
+            }
+
+            if(!expiredUnids.isEmpty()) {
+                System.out.println("ApiCacheAgent: " + expiredUnids.size() + " erledigte Request(s) geloescht.");
+            }
+
+        } catch(Exception e) {
+            System.out.println("ApiCacheAgent: Fehler beim Aufraeumen der Requests: " + e);
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * ProcessedAt als Millisekunden; 0 wenn das Feld fehlt (wird dann als
+     * "sehr alt" behandelt und aufgeraeumt).
+     */
+    private long getProcessedMillis(Document doc) throws NotesException {
+        Vector values = doc.getItemValue("ProcessedAt");
+
+        if(values != null && !values.isEmpty() && values.get(0) instanceof DateTime) {
+            return ((DateTime) values.get(0)).toJavaDate().getTime();
+        }
+
+        return 0;
     }
 
     /**
