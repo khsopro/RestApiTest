@@ -189,6 +189,12 @@ public class DataService {
     private static Object convertValue(Object raw, String type)
     		throws NotesException {
 
+    		    // Vor null- und MultiValue-Pruefung: auch eine leere oder
+    		    // mehrwertige Spalte soll ein Array von Objekten ergeben.
+    		    if("objlist".equals(type)) {
+    		        return toObjList(raw);
+    		    }
+
     		    if(raw == null) {
     		        return JSONObject.NULL;
     		    }
@@ -265,6 +271,51 @@ public class DataService {
     		            return raw.toString();
     		    }
     		}
+
+    /**
+     * "titel~Intranet#link~www.intranet.de|titel~Suche#link~www.google.com"
+     * -> [{"titel":"Intranet","link":"www.intranet.de"},{"titel":"Suche","link":"www.google.com"}]
+     * "|" trennt die Objekte, "#" die Felder, "~" Name und Wert (nur am
+     * ersten "~", der Wert darf also selbst "~" enthalten). Bei einer
+     * mehrwertigen Spalte ist jeder Wert ein weiteres Objekt.
+     */
+    private static JSONArray toObjList(Object raw) {
+        JSONArray list = new JSONArray();
+
+        if(raw == null) {
+            return list;
+        }
+
+        String text;
+        if(raw instanceof Vector) {
+            StringBuilder sb = new StringBuilder();
+            for(Object v : (Vector) raw) {
+                if(v != null) {
+                    sb.append(v.toString()).append('|');
+                }
+            }
+            text = sb.toString();
+        } else {
+            text = raw.toString();
+        }
+
+        for(String record : text.split("\\|")) {
+            JSONObject obj = new JSONObject();
+
+            for(String pair : record.split("#")) {
+                int sep = pair.indexOf('~');
+                if(sep > 0) {
+                    obj.put(pair.substring(0, sep).trim(), pair.substring(sep + 1).trim());
+                }
+            }
+
+            if(obj.length() > 0) {
+                list.put(obj);
+            }
+        }
+
+        return list;
+    }
 
     private static double parseDouble(Object val) {
         try {
