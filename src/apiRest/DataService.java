@@ -13,16 +13,15 @@ import org.json.JSONObject;
 public class DataService {
 
     /**
-     * Fingerabdruck des Ergebnisses fuer den ETag: durchlaeuft dieselbe Seite
-     * (start/limit) wie getData(), liest je Eintrag aber nur getLastModified()
+     * Fingerabdruck des Ergebnisses fuer den ETag: durchlaeuft dieselben
+     * Eintraege wie getData(), liest je Eintrag aber nur getLastModified()
      * statt die Felder zu konvertieren und JSON aufzubauen. Erkennt damit auch
      * replizierte Aenderungen (anders als Database.getLastModified()) und ist
      * trotz zweitem View-Durchlauf deutlich guenstiger als der volle JSON-Aufbau.
      */
     public static String getCacheKey(
         Session session,
-        Map<String, Object> config,
-        Map<String, String> params
+        Map<String, Object> config
     ) throws Exception {
 
         Database db = session.getCurrentDatabase();
@@ -32,16 +31,13 @@ public class DataService {
         View view = db.getView(viewName);
         view.setAutoUpdate(false);
 
-        int limit = getLimit(config, params);
-        int start = parseInt(params.get("start"), 0);
-
         ViewNavigator nav = view.createViewNav();
-        ViewEntry entry = nav.getNth(start + 1);
+        ViewEntry entry = nav.getFirst();
 
         long latest = 0;
         int count = 0;
 
-        while(entry != null && count < limit) {
+        while(entry != null) {
 
             if(entry.isCategory()) {
                 entry = nav.getNext(entry);
@@ -68,13 +64,19 @@ public class DataService {
         view.recycle();
         db.recycle();
 
-        return viewName + "|" + start + "|" + limit + "|" + count + "|" + latest;
+        return viewName + "|" + count + "|" + latest;
     }
 
-    public static Object getData(
+    /**
+     * Baut das komplette JSON des Endpoints - ohne Limit und ohne start, wie
+     * der ApiCacheAgent. Paging/Sortierung passieren in ApiServiceBean. Bei
+     * "arr" wird das gruppierte Objekt per groupsToJson() geschrieben, damit
+     * die Reihenfolge der Bereiche der View entspricht (org.json JSONObject
+     * haelt die Schluessel in einer HashMap und wuerfelt sie durcheinander).
+     */
+    public static String getData(
         Session session,
-        Map<String, Object> config,
-        Map<String, String> params
+        Map<String, Object> config
     ) throws Exception {
 
         Database db = session.getCurrentDatabase();
@@ -87,11 +89,8 @@ public class DataService {
         View view = db.getView(viewName);
         view.setAutoUpdate(false);
 
-        int limit = getLimit(config, params);
-        int start = parseInt(params.get("start"), 0);
-
         ViewNavigator nav = view.createViewNav();
-        ViewEntry entry = nav.getNth(start + 1);
+        ViewEntry entry = nav.getFirst();
 
         JSONArray flat = new JSONArray();
         Map<String, JSONArray> groups = new LinkedHashMap<>();
@@ -104,9 +103,7 @@ public class DataService {
                 ? ((Number) config.get("titlecol")).intValue()
                 : -1;
 
-        int count = 0;
-
-        while(entry != null && count < limit) {
+        while(entry != null) {
 
             if(entry.isCategory()) {
                 entry = nav.getNext(entry);
@@ -157,41 +154,32 @@ public class DataService {
             ViewEntry tmp = nav.getNext(entry);
             entry.recycle();
             entry = tmp;
-
-            count++;
         }
 
         view.recycle();
         db.recycle();
 
         // --- Ergebnis ---
-        if("obj".equals(jsonType)) {
-            return flat;
-        }
-
         if("arr".equals(jsonType)) {
-            JSONObject grouped = new JSONObject();
-            for(Map.Entry<String, JSONArray> e : groups.entrySet()) {
-                grouped.put(e.getKey(), e.getValue());
-            }
-            return grouped;
+            return groupsToJson(groups);
         }
 
         if("both".equals(jsonType)) {
-            JSONObject result = new JSONObject();
-
-            JSONObject grouped = new JSONObject();
-            for(Map.Entry<String, JSONArray> e : groups.entrySet()) {
-                grouped.put(e.getKey(), e.getValue());
-            }
-
-            result.put("obj", flat);
-            result.put("arr", grouped);
-
-            return result;
+            return "{\"obj\":" + flat.toString() + ",\"arr\":" + groupsToJson(groups) + "}";
         }
 
-        return flat;
+        return flat.toString();
+    }
+
+    private static String groupsToJson(Map<String, JSONArray> groups) {
+        StringBuilder sb = new StringBuilder("{");
+        for(Map.Entry<String, JSONArray> e : groups.entrySet()) {
+            if(sb.length() > 1) {
+                sb.append(',');
+            }
+            sb.append(JSONObject.quote(e.getKey())).append(':').append(e.getValue().toString());
+        }
+        return sb.append('}').toString();
     }
 
 
@@ -277,30 +265,6 @@ public class DataService {
     		            return raw.toString();
     		    }
     		}
-
-    // -------- LIMIT HANDLING --------
-    private static int getLimit(Map<String, Object> config, Map<String, String> params) {
-
-        int def = 5000;
-        int max = 20000;
-
-        if(config.containsKey("limit")) {
-            Map limitCfg = (Map) config.get("limit");
-            def = ((Number) limitCfg.get("default")).intValue();
-            max = ((Number) limitCfg.get("max")).intValue();
-        }
-
-        int req = parseInt(params.get("limit"), def);
-        return Math.min(req, max);
-    }
-
-    private static int parseInt(String val, int def) {
-        try {
-            return val != null ? Integer.parseInt(val) : def;
-        } catch(Exception e) {
-            return def;
-        }
-    }
 
     private static double parseDouble(Object val) {
         try {

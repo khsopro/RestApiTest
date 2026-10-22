@@ -441,8 +441,7 @@ public class ApiCacheAgent extends AgentBase {
 
         configDoc.recycle();
 
-        Object data = getData(session, config, new HashMap<String, String>());
-        String json = data.toString();
+        String json = getData(session, config);
         String etag = hashETag(json);
 
         Document cacheDoc = findCacheDocument(db, endpoint, config);
@@ -490,7 +489,7 @@ public class ApiCacheAgent extends AgentBase {
 
     /**
      * JSON als MIME-Entity statt klassisches Text-Item, um das ~64KB-Limit
-     * klassischer Notes-Textfelder zu umgehen (bei limit bis 20000 kann das
+     * klassischer Notes-Textfelder zu umgehen (ohne Limit kann das
      * JSON deutlich groesser werden).
      */
     private void writeJson(Session session, Document doc, String json) throws Exception {
@@ -528,11 +527,14 @@ public class ApiCacheAgent extends AgentBase {
 
     // -------- DATENAUFBAU (Kopie der Logik aus DataService, siehe Klassenkommentar) --------
 
-    private Object getData(
-        Session session,
-        Map<String, Object> config,
-        Map<String, String> params
-    ) throws Exception {
+    /**
+     * Baut das komplette JSON des Endpoints - ohne Limit und ohne start, das
+     * Paging passiert erst bei der Auslieferung in ApiServiceBean. Bei "arr"
+     * wird das gruppierte Objekt per groupsToJson() geschrieben, damit die
+     * Reihenfolge der Bereiche der View entspricht (org.json JSONObject haelt
+     * die Schluessel in einer HashMap und wuerfelt sie durcheinander).
+     */
+    private String getData(Session session, Map<String, Object> config) throws Exception {
 
         Database db = session.getCurrentDatabase();
 
@@ -544,11 +546,8 @@ public class ApiCacheAgent extends AgentBase {
         View view = db.getView(viewName);
         view.setAutoUpdate(false);
 
-        int limit = getLimit(config, params);
-        int start = parseInt(params.get("start"), 0);
-
         ViewNavigator nav = view.createViewNav();
-        ViewEntry entry = nav.getNth(start + 1);
+        ViewEntry entry = nav.getFirst();
 
         JSONArray flat = new JSONArray();
         Map<String, JSONArray> groups = new LinkedHashMap<>();
@@ -561,9 +560,7 @@ public class ApiCacheAgent extends AgentBase {
                 ? ((Number) config.get("titlecol")).intValue()
                 : -1;
 
-        int count = 0;
-
-        while(entry != null && count < limit) {
+        while(entry != null) {
 
             if(entry.isCategory()) {
                 entry = nav.getNext(entry);
@@ -609,40 +606,31 @@ public class ApiCacheAgent extends AgentBase {
             ViewEntry tmp = nav.getNext(entry);
             entry.recycle();
             entry = tmp;
-
-            count++;
         }
 
         view.recycle();
         db.recycle();
 
-        if("obj".equals(jsonType)) {
-            return flat;
-        }
-
         if("arr".equals(jsonType)) {
-            JSONObject grouped = new JSONObject();
-            for(Map.Entry<String, JSONArray> e : groups.entrySet()) {
-                grouped.put(e.getKey(), e.getValue());
-            }
-            return grouped;
+            return groupsToJson(groups);
         }
 
         if("both".equals(jsonType)) {
-            JSONObject result = new JSONObject();
-
-            JSONObject grouped = new JSONObject();
-            for(Map.Entry<String, JSONArray> e : groups.entrySet()) {
-                grouped.put(e.getKey(), e.getValue());
-            }
-
-            result.put("obj", flat);
-            result.put("arr", grouped);
-
-            return result;
+            return "{\"obj\":" + flat.toString() + ",\"arr\":" + groupsToJson(groups) + "}";
         }
 
-        return flat;
+        return flat.toString();
+    }
+
+    private String groupsToJson(Map<String, JSONArray> groups) {
+        StringBuilder sb = new StringBuilder("{");
+        for(Map.Entry<String, JSONArray> e : groups.entrySet()) {
+            if(sb.length() > 1) {
+                sb.append(',');
+            }
+            sb.append(JSONObject.quote(e.getKey())).append(':').append(e.getValue().toString());
+        }
+        return sb.append('}').toString();
     }
 
     private Object convertValue(Object raw, String type)
@@ -720,29 +708,6 @@ public class ApiCacheAgent extends AgentBase {
             case "string":
             default:
                 return raw.toString();
-        }
-    }
-
-    private int getLimit(Map<String, Object> config, Map<String, String> params) {
-
-        int def = 5000;
-        int max = 20000;
-
-        if(config.containsKey("limit")) {
-            Map limitCfg = (Map) config.get("limit");
-            def = ((Number) limitCfg.get("default")).intValue();
-            max = ((Number) limitCfg.get("max")).intValue();
-        }
-
-        int req = parseInt(params.get("limit"), def);
-        return Math.min(req, max);
-    }
-
-    private int parseInt(String val, int def) {
-        try {
-            return val != null ? Integer.parseInt(val) : def;
-        } catch(Exception e) {
-            return def;
         }
     }
 }
