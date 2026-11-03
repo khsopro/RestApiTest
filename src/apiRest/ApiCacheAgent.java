@@ -636,6 +636,11 @@ public class ApiCacheAgent extends AgentBase {
     private Object convertValue(Object raw, String type)
             throws NotesException {
 
+        // Typ aus der Config normalisieren: "objList", " objlist " oder ein
+        // fehlender Typ wuerden sonst an equals/switch vorbeilaufen (null
+        // im switch wirft sogar eine NullPointerException).
+        type = (type != null) ? type.trim().toLowerCase() : "string";
+
         // Vor null- und MultiValue-Pruefung: auch eine leere oder
         // mehrwertige Spalte soll ein Array von Objekten ergeben.
         if("objlist".equals(type)) {
