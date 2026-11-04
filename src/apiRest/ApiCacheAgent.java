@@ -193,11 +193,14 @@ public class ApiCacheAgent extends AgentBase {
             long lastFullRun = (long) state.getItemValueDouble("LastFullRunMillis");
 
             if(now - lastRequest < interval || now - lastFullRun < interval) {
+                long waitMillis = Math.max(interval - (now - lastRequest), interval - (now - lastFullRun));
+                System.out.println("ApiCacheAgent: Keine offenen Requests, kompletter Lauf erst in "
+                    + (waitMillis / 1000) + " s faellig - nichts zu tun.");
                 state.recycle();
                 return;
             }
 
-            runFullScan(session, db);
+            runFullScan(session, db, state);
 
             state.replaceItemValue("LastFullRunMillis", Double.valueOf(now));
             state.save(true, false);
@@ -369,9 +372,19 @@ public class ApiCacheAgent extends AgentBase {
     }
 
     /**
-     * Baut alle Endpoints aus CONFIG_VIEW neu.
+     * Baut alle Endpoints aus CONFIG_VIEW neu. Der Fortschritt steht im
+     * Profildokument "ApiCacheState" (Feld "FullRunStatus", fehlgeschlagene
+     * Endpoints in "FullRunErrors"). Bricht der Agent-Manager den Lauf ab,
+     * z.B. wegen der maximalen Laufzeit, zeigt "FullRunStatus" den Endpoint,
+     * an dem er gerade war.
      */
-    private void runFullScan(Session session, Database db) throws Exception {
+    private void runFullScan(Session session, Database db, Document state) throws Exception {
+
+        long started = System.currentTimeMillis();
+        int built = 0;
+        Vector<String> errors = new Vector<String>();
+
+        System.out.println("ApiCacheAgent: Kompletter Lauf gestartet.");
 
         View configView = db.getView(CONFIG_VIEW);
         configView.setAutoUpdate(false);
@@ -395,11 +408,15 @@ public class ApiCacheAgent extends AgentBase {
                         // bei gleichem Viewnamen oft denselben gecachten
                         // Handle zurueck, ein Recycle davon wuerde die View
                         // invalidieren, ueber die hier noch iteriert wird.
+                        setRunStatus(state, "laeuft seit " + ((System.currentTimeMillis() - started) / 1000)
+                            + " s, " + built + " gebaut, aktuell: " + endpoint);
                         Document configDoc = entry.getDocument();
                         buildAndStore(session, db, endpoint, configDoc);
+                        built++;
                     } catch(Exception e) {
                         System.out.println("ApiCacheAgent: Fehler bei Endpoint '" + endpoint + "': " + e);
                         e.printStackTrace();
+                        errors.add(endpoint + ": " + e);
                     }
                 }
             }
@@ -412,7 +429,22 @@ public class ApiCacheAgent extends AgentBase {
         nav.recycle();
         configView.recycle();
 
-        System.out.println("ApiCacheAgent: Kompletter Lauf abgeschlossen.");
+        String summary = built + " Endpoint(s) gebaut, " + errors.size() + " Fehler, "
+            + ((System.currentTimeMillis() - started) / 1000) + " s";
+
+        state.replaceItemValue("FullRunErrors", errors.isEmpty() ? "" : errors);
+        setRunStatus(state, "fertig: " + summary);
+
+        System.out.println("ApiCacheAgent: Kompletter Lauf abgeschlossen: " + summary);
+    }
+
+    private void setRunStatus(Document state, String status) {
+        try {
+            state.replaceItemValue("FullRunStatus", status);
+            state.save(true, false);
+        } catch(Exception e) {
+            System.out.println("ApiCacheAgent: Status konnte nicht gespeichert werden: " + e);
+        }
     }
 
     private void buildAndStore(Session session, Database db, String endpoint, Document configDoc) throws Exception {
@@ -441,6 +473,8 @@ public class ApiCacheAgent extends AgentBase {
 
         configDoc.recycle();
 
+        long started = System.currentTimeMillis();
+
         String json = getData(session, config);
         String etag = hashETag(json);
 
@@ -458,6 +492,9 @@ public class ApiCacheAgent extends AgentBase {
         cacheDoc.replaceItemValue("LastBuilt", session.createDateTime(new Date()));
         cacheDoc.save(true, false);
         cacheDoc.recycle();
+
+        System.out.println("ApiCacheAgent: Endpoint '" + endpoint + "' gebaut in "
+            + (System.currentTimeMillis() - started) + " ms (" + json.length() + " Zeichen).");
     }
 
     /**
