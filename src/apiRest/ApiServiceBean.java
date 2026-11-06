@@ -75,6 +75,13 @@ public class ApiServiceBean {
             int start = Math.max(0, parseInt(params.get("start"), 0));
             int limit = Math.max(0, getLimit(config, params));
 
+            // MIME-Items roh lesen: mit ConvertMime=true (Standard) wandelt
+            // Domino das Json-Item beim Oeffnen des Dokuments in Rich Text
+            // und beim Lesen wieder zurueck - dabei entstehen Zeilenumbrueche
+            // und verlorene Zeichen im JSON.
+            boolean convertMime = session.isConvertMime();
+            session.setConvertMime(false);
+
             Document cacheDoc = getCacheDocument(session, endpoint, config);
 
             try {
@@ -135,6 +142,7 @@ public class ApiServiceBean {
                 if(cacheDoc != null) {
                     cacheDoc.recycle();
                 }
+                session.setConvertMime(convertMime);
             }
 
         } catch (Exception e) {
@@ -207,6 +215,14 @@ public class ApiServiceBean {
 
             if(body == null) {
                 return null;
+            }
+
+            // Der Agent legt das JSON Base64-kodiert ab (siehe
+            // ApiCacheAgent.writeJson). decodeContent() aendert nur die Kopie
+            // im Speicher, das Dokument wird hier nicht gespeichert. Aeltere,
+            // unkodierte Cache-Dokumente werden unveraendert gelesen.
+            if(body.getEncoding() != MIMEEntity.ENC_NONE) {
+                body.decodeContent();
             }
 
             return body.getContentAsText();

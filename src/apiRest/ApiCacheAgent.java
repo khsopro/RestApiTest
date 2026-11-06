@@ -123,6 +123,10 @@ public class ApiCacheAgent extends AgentBase {
             AgentContext agentContext = session.getAgentContext();
             Database db = agentContext.getCurrentDatabase();
 
+            // MIME-Items roh lesen und schreiben, ohne Umwandlung in Rich
+            // Text (die bricht das JSON in Zeilen um).
+            session.setConvertMime(false);
+
             // Nur auf dem im Profildokument konfigurierten Server arbeiten.
             // Fehlt die Konfiguration (Profildokument nicht vorhanden oder
             // Feld leer), wird gar nicht gelaufen.
@@ -527,7 +531,10 @@ public class ApiCacheAgent extends AgentBase {
     /**
      * JSON als MIME-Entity statt klassisches Text-Item, um das ~64KB-Limit
      * klassischer Notes-Textfelder zu umgehen (ohne Limit kann das
-     * JSON deutlich groesser werden).
+     * JSON deutlich groesser werden). Base64-kodiert, weil MIME-Zeilen
+     * hoechstens 998 Zeichen lang sein duerfen und Domino das einzeilige
+     * JSON sonst umbrechen kann; ApiServiceBean.readCachedJson() dekodiert
+     * es wieder.
      */
     private void writeJson(Session session, Document doc, String json) throws Exception {
 
@@ -541,6 +548,7 @@ public class ApiCacheAgent extends AgentBase {
 
         MIMEEntity body = doc.createMIMEEntity("Json");
         body.setContentFromText(stream, "application/json; charset=UTF-8", MIMEEntity.ENC_NONE);
+        body.encodeContent(MIMEEntity.ENC_BASE64);
 
         stream.close();
     }
