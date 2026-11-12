@@ -63,14 +63,27 @@ public class ApiServiceBean {
                 return;
             }
 
-            // Paging/Sortierung nur, wenn einer der Parameter gesetzt ist.
-            // Ohne Parameter wird das JSON unveraendert wie bisher geliefert.
-            // Mit Parametern: bei "arr" ohne "bereich" weiter als Objekt der
-            // Bereiche, sortiert und geblaettert wird je Bereich; mit
-            // "bereich" und bei "obj" als Array.
+            // Paging/Sortierung/Filter nur, wenn einer der Parameter gesetzt
+            // ist. Ohne Parameter wird das JSON unveraendert wie bisher
+            // geliefert. Mit Parametern: bei "arr" ohne "bereich" weiter als
+            // Objekt der Bereiche, gefiltert, sortiert und geblaettert wird
+            // je Bereich; mit "bereich" und bei "obj" als Array.
+            // "auswahl=feld" liefert stattdessen die vorkommenden Werte des
+            // Feldes, "feld=x&wert=y" nur die Zeilen mit diesem Wert.
             String bereich = trimToNull(params.get("bereich"));
             String sort = trimToNull(params.get("sort"));
-            boolean paged = bereich != null || sort != null
+            String auswahl = trimToNull(params.get("auswahl"));
+            String feld = trimToNull(params.get("feld"));
+            String wert = trimToNull(params.get("wert"));
+
+            // Filter nur mit bekanntem Feld und Wert, sonst ignorieren (wie
+            // unbekannte Sortierfelder)
+            if(feld == null || wert == null || !getFieldNames(config).contains(feld)) {
+                feld = null;
+                wert = null;
+            }
+
+            boolean paged = bereich != null || sort != null || auswahl != null || feld != null
                 || params.containsKey("start") || params.containsKey("limit");
 
             int start = Math.max(0, parseInt(params.get("start"), 0));
@@ -103,7 +116,8 @@ public class ApiServiceBean {
                 // vom ETag des Gesamt-JSON - ohne die Daten anzufassen, damit
                 // der 304 weiterhin vor jedem Parsen greift.
                 String etag = (paged && baseETag != null)
-                    ? generateETag(baseETag + "|" + bereich + "|" + start + "|" + limit + "|" + sort)
+                    ? generateETag(baseETag + "|" + bereich + "|" + start + "|" + limit + "|" + sort
+                        + "|" + auswahl + "|" + feld + "|" + wert)
                     : baseETag;
 
                 if(etag != null) {
@@ -124,14 +138,22 @@ public class ApiServiceBean {
 
                 ParsedData data = getParsedData(session, endpoint, baseETag, config, cacheDoc);
 
-                if(bereich == null && "arr".equals(config.get("art"))) {
-                    // X-Total-Count = alle Zeilen ueber alle Bereiche
-                    response.setHeader("X-Total-Count", String.valueOf(data.all.length()));
-                    writer.write(pageGroups(data.groups, sort, config, start, limit));
+                if(auswahl != null) {
+                    // Werte fuer eine Auswahlliste: ueber alle Zeilen bzw.
+                    // nur den angegebenen Bereich, ein gesetzter Filter wirkt
+                    // mit (fuer abhaengige Auswahllisten)
+                    writer.write(distinctValues(filterRows(data.select(bereich), feld, wert), auswahl, config).toString());
                     return;
                 }
 
-                List<Object> sorted = sortRows(data.select(bereich), sort, config);
+                if(bereich == null && "arr".equals(config.get("art"))) {
+                    // X-Total-Count = alle (gefilterten) Zeilen ueber alle Bereiche
+                    response.setHeader("X-Total-Count", String.valueOf(filterRows(data.all, feld, wert).length()));
+                    writer.write(pageGroups(data.groups, feld, wert, sort, config, start, limit));
+                    return;
+                }
+
+                List<Object> sorted = sortRows(filterRows(data.select(bereich), feld, wert), sort, config);
 
                 response.setHeader("X-Total-Count", String.valueOf(sorted.size()));
                 writer.write(pageOf(sorted, start, limit).toString());
@@ -376,13 +398,13 @@ public class ApiServiceBean {
     }
 
     /**
-     * Sortiert und blaettert jeden Bereich fuer sich und schreibt sie als
+     * Filtert, sortiert und blaettert jeden Bereich fuer sich und schreibt sie als
      * Objekt {"Kap1":[...],"Kap2":[...]} in View-Reihenfolge (ein
      * JSONObject wuerde die Reihenfolge verlieren). Bereiche, deren Seite
      * leer ist, bleiben mit [] enthalten.
      */
-    private String pageGroups(Map<String, JSONArray> groups, String sort, Map<String, Object> config,
-            int start, int limit) throws Exception {
+    private String pageGroups(Map<String, JSONArray> groups, String feld, String wert, String sort,
+            Map<String, Object> config, int start, int limit) throws Exception {
 
         StringBuilder out = new StringBuilder("{");
 
@@ -390,7 +412,7 @@ public class ApiServiceBean {
             if(out.length() > 1) {
                 out.append(',');
             }
-            List<Object> sorted = sortRows(e.getValue(), sort, config);
+            List<Object> sorted = sortRows(filterRows(e.getValue(), feld, wert), sort, config);
             out.append(JSONObject.quote(e.getKey())).append(':')
                .append(pageOf(sorted, start, limit).toString());
         }
@@ -479,7 +501,118 @@ public class ApiServiceBean {
         return list;
     }
 
-    private Set<String> getSortableFields(Map<String, Object> config) {
+    /**
+     * Nur Zeilen, deren Feld "feld" den Wert "wert" hat (ohne Gross-/
+     * Kleinschreibung). Bei mehrwertigen Feldern reicht ein passender Wert.
+     * Ohne Filter wird rows unveraendert zurueckgegeben.
+     */
+    private JSONArray filterRows(JSONArray rows, String feld, String wert) {
+        if(feld == null) {
+            return rows;
+        }
+
+        JSONArray out = new JSONArray();
+        for(int i = 0; i < rows.length(); i++) {
+            Object row = rows.opt(i);
+            if(row instanceof JSONObject && matches(((JSONObject) row).opt(feld), wert)) {
+                out.put(row);
+            }
+        }
+        return out;
+    }
+
+    private static boolean matches(Object value, String wert) {
+        if(value instanceof JSONArray) {
+            JSONArray values = (JSONArray) value;
+            for(int i = 0; i < values.length(); i++) {
+                if(matches(values.opt(i), wert)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        String text = valueText(value);
+        return text != null && text.equalsIgnoreCase(wert);
+    }
+
+    /**
+     * Alle vorkommenden Werte des Feldes fuer eine Auswahlliste: ohne leere
+     * Werte, ohne Doppelte (ohne Gross-/Kleinschreibung), sortiert wie bei
+     * "sort". Mehrwertige Felder liefern jeden Einzelwert. Unbekanntes Feld
+     * ergibt [].
+     */
+    private JSONArray distinctValues(JSONArray rows, String feld, Map<String, Object> config) {
+        JSONArray out = new JSONArray();
+
+        if(!getFieldNames(config).contains(feld)) {
+            return out;
+        }
+
+        Map<String, Object> seen = new LinkedHashMap<String, Object>();
+        for(int i = 0; i < rows.length(); i++) {
+            Object row = rows.opt(i);
+            if(row instanceof JSONObject) {
+                collectValues(((JSONObject) row).opt(feld), seen);
+            }
+        }
+
+        List<Object> values = new ArrayList<Object>(seen.values());
+
+        final Collator collator = Collator.getInstance(Locale.GERMAN);
+        collator.setStrength(Collator.SECONDARY);
+
+        Collections.sort(values, new Comparator<Object>() {
+            public int compare(Object a, Object b) {
+                return compareValues(a, b, collator);
+            }
+        });
+
+        for(Object v : values) {
+            out.put(v);
+        }
+        return out;
+    }
+
+    private static void collectValues(Object value, Map<String, Object> seen) {
+        if(value instanceof JSONArray) {
+            JSONArray values = (JSONArray) value;
+            for(int i = 0; i < values.length(); i++) {
+                collectValues(values.opt(i), seen);
+            }
+            return;
+        }
+
+        String text = valueText(value);
+        if(text != null && !seen.containsKey(text.toLowerCase())) {
+            seen.put(text.toLowerCase(), value);
+        }
+    }
+
+    /**
+     * Vergleichbarer Text eines einfachen Wertes, null fuer leere Werte und
+     * Objekte/Arrays. Zahlen wie im JSON (2.0 -> "2"), damit ein Wert aus
+     * der Auswahlliste unveraendert als "wert" zurueckgegeben werden kann.
+     */
+    private static String valueText(Object value) {
+        if(isEmpty(value) || value instanceof JSONObject || value instanceof JSONArray) {
+            return null;
+        }
+        if(value instanceof Number) {
+            try {
+                return JSONObject.numberToString((Number) value);
+            } catch(Exception e) {
+                return value.toString();
+            }
+        }
+        String text = value.toString().trim();
+        return text.isEmpty() ? null : text;
+    }
+
+    /**
+     * Die json-Namen aus "fields" der Config.
+     */
+    private Set<String> getFieldNames(Map<String, Object> config) {
         Set<String> fieldNames = new HashSet<String>();
 
         @SuppressWarnings("unchecked")
@@ -492,6 +625,12 @@ public class ApiServiceBean {
                 }
             }
         }
+
+        return fieldNames;
+    }
+
+    private Set<String> getSortableFields(Map<String, Object> config) {
+        Set<String> fieldNames = getFieldNames(config);
 
         Object sortable = config.get("sortable");
         if(sortable instanceof List) {
