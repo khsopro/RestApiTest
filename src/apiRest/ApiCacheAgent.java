@@ -543,6 +543,13 @@ public class ApiCacheAgent extends AgentBase {
             existing.remove();
         }
 
+        // Domino haengt bei jedem Speichern eines MIME-Items eine Zeile an
+        // $MIMETrack an. Da das Cache-Dokument bei jedem Lauf neu
+        // geschrieben wird, liefe das Feld sonst irgendwann ueber
+        // (Textfeld-Grenze ~64KB). Entfernen - beim Speichern traegt Domino
+        // nur die aktuelle Zeile wieder ein.
+        doc.removeItem("$MIMETrack");
+
         Stream stream = session.createStream();
         stream.writeText(json);
 
