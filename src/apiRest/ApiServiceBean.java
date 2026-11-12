@@ -64,9 +64,10 @@ public class ApiServiceBean {
             }
 
             // Paging/Sortierung nur, wenn einer der Parameter gesetzt ist.
-            // Ohne Parameter wird das JSON unveraendert wie bisher geliefert
-            // (bei "arr" also weiter als Objekt), mit Parametern immer als
-            // Array.
+            // Ohne Parameter wird das JSON unveraendert wie bisher geliefert.
+            // Mit Parametern: bei "arr" ohne "bereich" weiter als Objekt der
+            // Bereiche, sortiert und geblaettert wird je Bereich; mit
+            // "bereich" und bei "obj" als Array.
             String bereich = trimToNull(params.get("bereich"));
             String sort = trimToNull(params.get("sort"));
             boolean paged = bereich != null || sort != null
@@ -122,21 +123,18 @@ public class ApiServiceBean {
                 }
 
                 ParsedData data = getParsedData(session, endpoint, baseETag, config, cacheDoc);
-                JSONArray rows = data.select(bereich);
 
-                List<Object> sorted = sortRows(rows, sort, config);
-
-                int total = sorted.size();
-                int from = Math.min(start, total);
-                int to = (int) Math.min((long) from + limit, total);
-
-                JSONArray page = new JSONArray();
-                for(int i = from; i < to; i++) {
-                    page.put(sorted.get(i));
+                if(bereich == null && "arr".equals(config.get("art"))) {
+                    // X-Total-Count = alle Zeilen ueber alle Bereiche
+                    response.setHeader("X-Total-Count", String.valueOf(data.all.length()));
+                    writer.write(pageGroups(data.groups, sort, config, start, limit));
+                    return;
                 }
 
-                response.setHeader("X-Total-Count", String.valueOf(total));
-                writer.write(page.toString());
+                List<Object> sorted = sortRows(data.select(bereich), sort, config);
+
+                response.setHeader("X-Total-Count", String.valueOf(sorted.size()));
+                writer.write(pageOf(sorted, start, limit).toString());
 
             } finally {
                 if(cacheDoc != null) {
@@ -270,9 +268,9 @@ public class ApiServiceBean {
         }
 
         /**
-         * Ohne Bereich alle Zeilen (bei "arr" die Bereiche hintereinander in
-         * View-Reihenfolge), mit Bereich nur dessen Zeilen. Bei "obj" gibt es
-         * keine Bereiche, der Parameter wird dort ignoriert.
+         * Ohne Bereich alle Zeilen (bei "both" die "obj"-Liste), mit Bereich
+         * nur dessen Zeilen. Bei "obj" gibt es keine Bereiche, der Parameter
+         * wird dort ignoriert.
          */
         JSONArray select(String bereich) {
             if(bereich == null || groups == null) {
@@ -375,6 +373,41 @@ public class ApiServiceBean {
                 throw x.syntaxError("Expected a ',' or '}'");
             }
         }
+    }
+
+    /**
+     * Sortiert und blaettert jeden Bereich fuer sich und schreibt sie als
+     * Objekt {"Kap1":[...],"Kap2":[...]} in View-Reihenfolge (ein
+     * JSONObject wuerde die Reihenfolge verlieren). Bereiche, deren Seite
+     * leer ist, bleiben mit [] enthalten.
+     */
+    private String pageGroups(Map<String, JSONArray> groups, String sort, Map<String, Object> config,
+            int start, int limit) throws Exception {
+
+        StringBuilder out = new StringBuilder("{");
+
+        for(Map.Entry<String, JSONArray> e : groups.entrySet()) {
+            if(out.length() > 1) {
+                out.append(',');
+            }
+            List<Object> sorted = sortRows(e.getValue(), sort, config);
+            out.append(JSONObject.quote(e.getKey())).append(':')
+               .append(pageOf(sorted, start, limit).toString());
+        }
+
+        return out.append('}').toString();
+    }
+
+    private JSONArray pageOf(List<Object> rows, int start, int limit) {
+        int total = rows.size();
+        int from = Math.min(start, total);
+        int to = (int) Math.min((long) from + limit, total);
+
+        JSONArray page = new JSONArray();
+        for(int i = from; i < to; i++) {
+            page.put(rows.get(i));
+        }
+        return page;
     }
 
     /**
