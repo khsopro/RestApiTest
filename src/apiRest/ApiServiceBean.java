@@ -149,9 +149,12 @@ public class ApiServiceBean {
            StringWriter sw = new StringWriter();
            e.printStackTrace(new PrintWriter(sw));
            writeError(response, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, sw.toString());
+        } finally {
+            // Auf jedem Weg, auch nach den return-Anweisungen oben (304,
+            // unbekannter Endpoint, Ausgabe ohne Parameter): sonst rendert
+            // JSF danach die XPage selbst und haengt ihr HTML an das JSON an.
+            fc.responseComplete();
         }
-
-        fc.responseComplete();
     }
 
     private String extractEndpoint(String uri) {
