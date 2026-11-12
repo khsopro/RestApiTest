@@ -139,10 +139,14 @@ public class ApiServiceBean {
                 ParsedData data = getParsedData(session, endpoint, baseETag, config, cacheDoc);
 
                 if(auswahl != null) {
-                    // Werte fuer eine Auswahlliste: ueber alle Zeilen bzw.
-                    // nur den angegebenen Bereich, ein gesetzter Filter wirkt
-                    // mit (fuer abhaengige Auswahllisten)
-                    writer.write(distinctValues(filterRows(data.select(bereich), feld, wert), auswahl, config).toString());
+                    // Werte fuer eine Auswahlliste, ein gesetzter Filter wirkt
+                    // mit (fuer abhaengige Auswahllisten). Bei "arr" ohne
+                    // "bereich" je Bereich, sonst als ein Array.
+                    if(bereich == null && "arr".equals(config.get("art"))) {
+                        writer.write(distinctGroups(data.groups, feld, wert, auswahl, config));
+                    } else {
+                        writer.write(distinctValues(filterRows(data.select(bereich), feld, wert), auswahl, config).toString());
+                    }
                     return;
                 }
 
@@ -572,6 +576,26 @@ public class ApiServiceBean {
             out.put(v);
         }
         return out;
+    }
+
+    /**
+     * distinctValues() je Bereich, als Objekt {"Kap1":[...],"Kap2":[...]} in
+     * View-Reihenfolge. Bereiche ohne Werte bleiben mit [] enthalten.
+     */
+    private String distinctGroups(Map<String, JSONArray> groups, String feld, String wert,
+            String auswahl, Map<String, Object> config) {
+
+        StringBuilder out = new StringBuilder("{");
+
+        for(Map.Entry<String, JSONArray> e : groups.entrySet()) {
+            if(out.length() > 1) {
+                out.append(',');
+            }
+            out.append(JSONObject.quote(e.getKey())).append(':')
+               .append(distinctValues(filterRows(e.getValue(), feld, wert), auswahl, config).toString());
+        }
+
+        return out.append('}').toString();
     }
 
     private static void collectValues(Object value, Map<String, Object> seen) {
